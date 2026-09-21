@@ -67,7 +67,7 @@ export default function RegisterPage({ onSwitchToLogin, onBackToStore }) {
         {/* Header */}
         <div className="text-center mb-6">
           <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/30 mx-auto mb-3">
-            <span className="text-3xl">🥬</span>
+            <span className="text-3xl">🛒</span>
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">
             Daftar Akun <span className="text-emerald-600">FreshMarket</span>

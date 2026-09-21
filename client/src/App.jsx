@@ -402,11 +402,11 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-white text-base font-black">
-              <span className="text-xl">🥬</span>
-              <span>Fresh<span className="text-emerald-400">Sayur</span></span>
+              <span className="text-xl">🛒</span>
+              <span>Fresh<span className="text-emerald-400">Market</span></span>
             </div>
             <p className="text-slate-400 leading-relaxed text-xs">
-              Platform toko sayur modern yang menghubungkan pasokan petani sayur lokal panen subuh langsung ke meja dapur keluarga Anda dengan kualitas terjamin.
+              Platform belanja kebutuhan segar modern yang menghubungkan pasokan petani lokal panen subuh langsung ke meja dapur keluarga Anda dengan kualitas terjamin.
             </p>
           </div>
 
