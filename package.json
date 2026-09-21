@@ -1,0 +1,20 @@
+{
+  "name": "freshmarket",
+  "version": "1.0.0",
+  "description": "FreshMarket - Aplikasi Web Belanja Kebutuhan Segar (React + Express + PostgreSQL)",
+  "scripts": {
+    "server": "cd server && node index.js",
+    "client": "cd client && npm run dev",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "install:all": "npm install && npm --prefix client install && npm --prefix server install",
+    "build:client": "npm --prefix client run build",
+    "build": "npm --prefix client install && npm --prefix client run build && npm --prefix server install",
+    "start": "cd server && node index.js"
+  },
+  "keywords": ["freshmarket", "ecommerce", "react", "express", "postgres"],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18"
+  }
+}

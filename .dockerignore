@@ -1,0 +1,38 @@
+# Node modules (di-install ulang di build)
+**/node_modules
+**/.npm
+
+# Build output (akan di-build ulang)
+client/dist
+
+# Logs
+**/*.log
+**/npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+**/.env
+
+# Local data
+server/data.json
+server/uploads/
+
+# Git
+.git
+.gitignore
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
+*.md
+
+# Docker itself
+Dockerfile
+.dockerignore
