@@ -93,7 +93,7 @@ export default function CheckoutModal({
     ).join('\n');
 
     const rawPhone = (storeInfo?.whatsapp || '6281234567890').replace(/[^0-9]/g, '');
-    const message = `Halo *${storeInfo?.name || 'Toko Sayur Segar'}*, saya ingin memesan sayur:\n\n` +
+    const message = `Halo *${storeInfo?.name || 'FreshMarket'}*, saya ingin memesan belanjaan segar:\n\n` +
       `👤 *Data Pemesan:*\n` +
       `• Nama: ${formData.customerName}\n` +
       `• No. HP/WA: ${formData.customerPhone}\n` +
@@ -349,7 +349,7 @@ export default function CheckoutModal({
                   <QrCode className="w-9 h-9 text-slate-800" />
                 </div>
                 <div>
-                  <span className="font-bold block">QRIS Toko Sayur Otomatis:</span>
+                  <span className="font-bold block">QRIS FreshMarket Otomatis:</span>
                   <span>Kode QRIS toko akan ditampilkan setelah pesanan dibuat untuk discan dari e-wallet / m-banking Anda.</span>
                 </div>
               </div>
@@ -357,9 +357,9 @@ export default function CheckoutModal({
 
             {formData.paymentMethod.includes('Transfer') && (
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-900 space-y-1">
-                <span className="font-bold block">Nomor Rekening Toko Sayur:</span>
-                <div>• BCA: <b>8720-123-456</b> (a.n. Toko Sayur Segar)</div>
-                <div>• Mandiri: <b>137-00-987654-1</b> (a.n. Toko Sayur Segar)</div>
+                <span className="font-bold block">Nomor Rekening FreshMarket:</span>
+                <div>• BCA: <b>8720-123-456</b> (a.n. FreshMarket)</div>
+                <div>• Mandiri: <b>137-00-987654-1</b> (a.n. FreshMarket)</div>
               </div>
             )}
           </div>

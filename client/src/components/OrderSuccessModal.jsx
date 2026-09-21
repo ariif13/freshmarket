@@ -6,7 +6,8 @@ export default function OrderSuccessModal({ order, onClose, onViewMyOrders, stor
   if (!order) return null;
 
   const rawPhone = (storeInfo?.whatsapp || '6281234567890').replace(/[^0-9]/g, '');
-  const waUrl = `https://wa.me/${rawPhone}?text=Halo%20FreshSayur,%20saya%20sudah%20membuat%20pesanan%20dengan%20ID%20*${order.id}*%20atas%20nama%20*${encodeURIComponent(order.customerName)}*.%20Mohon%20dikonfirmasi%20ya!%20Terima%20kasih.`;
+  const storeName = storeInfo?.name || 'FreshMarket';
+  const waUrl = `https://wa.me/${rawPhone}?text=Halo%20${encodeURIComponent(storeName)},%20saya%20sudah%20membuat%20pesanan%20dengan%20ID%20*${order.id}*%20atas%20nama%20*${encodeURIComponent(order.customerName)}*.%20Mohon%20dikonfirmasi%20ya!%20Terima%20kasih.`;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -20,7 +21,7 @@ export default function OrderSuccessModal({ order, onClose, onViewMyOrders, stor
           Pesanan Berhasil Dibuat!
         </h2>
         <p className="text-xs sm:text-sm text-slate-500 mt-1">
-          Sayuran segar Anda sedang disiapkan oleh tim Toko Sayur.
+          Kebutuhan segar Anda sedang disiapkan oleh tim FreshMarket.
         </p>
 
         {/* Order Info Card */}
@@ -61,12 +62,12 @@ export default function OrderSuccessModal({ order, onClose, onViewMyOrders, stor
             </span>
             <div className="inline-block p-3 bg-white rounded-xl shadow-xs border border-emerald-300">
               <img
-                src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=00020101021126580016ID.CO.FRESHSAYUR.WWW01189360099900000000005204541153033605802ID5916FRESHSAYUR%20STORE6007JAKARTA62070703A016304A12B"
+                src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=00020101021126580016ID.CO.FRESHMARKET.WWW01189360099900000000005204541153033605802ID5916FRESHMARKET%20STORE6007JAKARTA62070703A016304A12B"
                 alt="QRIS Code"
                 className="w-36 h-36 mx-auto"
               />
               <span className="text-[10px] text-slate-500 font-mono mt-1 block">
-                NMID: ID102003920192 • Toko Sayur Segar
+                NMID: ID102003920192 • FreshMarket
               </span>
             </div>
             <p className="text-[11px] text-emerald-800">

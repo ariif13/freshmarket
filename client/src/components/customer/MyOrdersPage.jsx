@@ -46,7 +46,7 @@ const STATUS_CONFIG = {
     color: 'bg-emerald-100 text-emerald-800 border-emerald-300',
     bar: 'bg-emerald-500',
     icon: CheckCircle2,
-    desc: 'Pesanan telah sampai. Terima kasih sudah belanja di FreshSayur!'
+    desc: 'Pesanan telah sampai. Terima kasih sudah belanja di FreshMarket!'
   },
   'Dibatalkan': {
     color: 'bg-rose-100 text-rose-800 border-rose-300',
@@ -154,7 +154,7 @@ export default function MyOrdersPage({ onBackToStore, storeInfo }) {
   const buildWhatsAppLink = (order) => {
     const rawPhone = (storeInfo?.whatsapp || '6281234567890').replace(/[^0-9]/g, '');
     const message =
-      `Halo Admin *${storeInfo?.name || 'FreshSayur'}*,\n\n` +
+      `Halo Admin *${storeInfo?.name || 'FreshMarket'}*,\n\n` +
       `Saya ingin menanyakan status pesanan saya:\n` +
       `• ID Pesanan: *${order.id}*\n` +
       `• Nama: ${order.customerName}\n` +
@@ -180,7 +180,7 @@ export default function MyOrdersPage({ onBackToStore, storeInfo }) {
             Pesanan Saya
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Riwayat semua transaksi dan pesanan Anda di FreshSayur
+            Riwayat semua transaksi dan pesanan Anda di FreshMarket
           </p>
         </div>
 

@@ -40,7 +40,7 @@ export default function App() {
   // Cart State (Persisted in localStorage)
   const [cart, setCart] = useState(() => {
     try {
-      const saved = localStorage.getItem('freshsayur_cart');
+      const saved = localStorage.getItem('freshmarket_cart') || localStorage.getItem('freshsayur_cart');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -57,7 +57,7 @@ export default function App() {
   // Save cart to local storage
   useEffect(() => {
     try {
-      localStorage.setItem('freshsayur_cart', JSON.stringify(cart));
+      localStorage.setItem('freshmarket_cart', JSON.stringify(cart));
     } catch (e) {
       console.error(e);
     }
@@ -198,7 +198,7 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 to-teal-50">
         <div className="text-center space-y-3">
           <div className="w-14 h-14 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm font-medium text-slate-600">Memuat FreshSayur...</p>
+          <p className="text-sm font-medium text-slate-600">Memuat FreshMarket...</p>
         </div>
       </div>
     );
@@ -440,7 +440,7 @@ export default function App() {
         </div>
 
         <div className="border-t border-slate-800/80 py-4 text-center text-slate-500 text-[11px]">
-          © 2026 FreshSayur • Aplikasi Web Toko Sayur Segar Indonesia
+          © 2026 FreshMarket • Aplikasi Web Belanja Kebutuhan Segar Indonesia
         </div>
       </footer>
     </div>

@@ -34,8 +34,12 @@ export function AuthProvider({ children }) {
   // Auto-logout listener (dari api.js ketika dapat 401)
   useEffect(() => {
     const handler = () => setUser(null);
+    window.addEventListener('freshmarket:unauthorized', handler);
     window.addEventListener('freshsayur:unauthorized', handler);
-    return () => window.removeEventListener('freshsayur:unauthorized', handler);
+    return () => {
+      window.removeEventListener('freshmarket:unauthorized', handler);
+      window.removeEventListener('freshsayur:unauthorized', handler);
+    };
   }, []);
 
   const login = async ({ email, password }) => {

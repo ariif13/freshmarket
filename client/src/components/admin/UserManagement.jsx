@@ -749,7 +749,7 @@ function ResetPasswordResultModal({ result, onClose }) {
 
   const waLink = result.user?.phone
     ? `https://wa.me/${result.user.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-        `Halo ${result.user.name},\n\nPassword akun FreshSayur Anda telah direset oleh admin.\n\n` +
+        `Halo ${result.user.name},\n\nPassword akun FreshMarket Anda telah direset oleh admin.\n\n` +
         `Password baru: ${result.newPassword}\n\n` +
         `Silakan login dan segera ubah password Anda dari menu Profil untuk keamanan. Terima kasih.`
       )}`

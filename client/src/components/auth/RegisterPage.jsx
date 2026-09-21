@@ -70,7 +70,7 @@ export default function RegisterPage({ onSwitchToLogin, onBackToStore }) {
             <span className="text-3xl">🥬</span>
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-            Daftar Akun <span className="text-emerald-600">FreshSayur</span>
+            Daftar Akun <span className="text-emerald-600">FreshMarket</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">Gratis, cepat, dan bisa langsung belanja sayur segar</p>
         </div>
@@ -215,7 +215,7 @@ export default function RegisterPage({ onSwitchToLogin, onBackToStore }) {
 
         <p className="text-center text-[11px] text-slate-400 mt-4 flex items-center justify-center gap-1">
           <Sparkles className="w-3 h-3" />
-          Dengan mendaftar Anda menyetujui syarat & ketentuan FreshSayur
+          Dengan mendaftar Anda menyetujui syarat & ketentuan FreshMarket
         </p>
       </div>
     </div>

@@ -1,16 +1,26 @@
 const BASE_URL = '/api';
-const TOKEN_KEY = 'freshsayur_token';
+const TOKEN_KEY = 'freshmarket_token';
 
 // ---------- Token helpers ----------
 export const tokenStorage = {
   get() {
-    try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+    try {
+      return localStorage.getItem(TOKEN_KEY) || localStorage.getItem('freshsayur_token');
+    } catch {
+      return null;
+    }
   },
   set(token) {
-    try { localStorage.setItem(TOKEN_KEY, token); } catch {}
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+      localStorage.removeItem('freshsayur_token');
+    } catch {}
   },
   clear() {
-    try { localStorage.removeItem(TOKEN_KEY); } catch {}
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem('freshsayur_token');
+    } catch {}
   }
 };
 
@@ -37,7 +47,7 @@ async function request(url, options = {}) {
     // Auto-logout kalau token tidak valid / expired (tapi jangan pas login endpoint)
     if (res.status === 401 && !url.includes('/auth/login')) {
       tokenStorage.clear();
-      window.dispatchEvent(new CustomEvent('freshsayur:unauthorized'));
+      window.dispatchEvent(new CustomEvent('freshmarket:unauthorized'));
     }
 
     // Enrich error dengan metadata dari server
