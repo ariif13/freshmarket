@@ -20,6 +20,7 @@ import {
 import { api, formatRupiah, COMMON_UNITS } from '../../services/api';
 
 export default function ProductManagement({ categories }) {
+  const defaultCategory = categories.find((category) => category.id !== 'semua')?.id || 'sayur-mayur';
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -40,7 +41,7 @@ export default function ProductManagement({ categories }) {
   // Form State for Add/Edit
   const [formData, setFormData] = useState({
     name: '',
-    category: 'sayuran-daun',
+    category: defaultCategory,
     price: '',
     unit: 'ikat (~250g)',
     customUnit: '',
@@ -82,7 +83,7 @@ export default function ProductManagement({ categories }) {
     setImageInputMode('file');
     setFormData({
       name: '',
-      category: 'sayuran-daun',
+      category: defaultCategory,
       price: '',
       unit: 'ikat',
       customUnit: '',
@@ -143,9 +144,10 @@ export default function ProductManagement({ categories }) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate size (max 8MB)
-    if (file.size > 8 * 1024 * 1024) {
-      alert('Ukuran file maksimal 8MB');
+    // Batas harus sama dengan batas validasi server.
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Ukuran file maksimal 5MB');
+      e.target.value = '';
       return;
     }
 
@@ -174,6 +176,13 @@ export default function ProductManagement({ categories }) {
   const handleQuickFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !quickUploadProductId) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Ukuran file maksimal 5MB');
+      e.target.value = '';
+      setQuickUploadProductId(null);
+      return;
+    }
 
     try {
       const res = await api.uploadImage(file);
@@ -396,7 +405,7 @@ export default function ProductManagement({ categories }) {
                     </td>
 
                     <td className="px-4 py-3 capitalize">
-                      {p.category.replace('-', ' ')}
+                      {p.category?.replace('-', ' ') || 'Tanpa kategori'}
                     </td>
 
                     {/* Quick Unit Selector */}
@@ -565,7 +574,7 @@ export default function ProductManagement({ categories }) {
                           <span>{formData.image ? 'Ganti Foto dari Perangkat' : 'Pilih Foto dari Galeri / Kamera'}</span>
                         </button>
                         <span className="text-[10px] text-slate-500 mt-1 block">
-                          Format: JPG, PNG, WebP (Maksimal 8 MB)
+                          Format: JPG, PNG, WebP (Maksimal 5 MB)
                         </span>
                       </div>
                     ) : (

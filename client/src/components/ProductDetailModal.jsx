@@ -5,11 +5,12 @@ import StarRating from './reviews/StarRating';
 import ReviewSection from './reviews/ReviewSection';
 
 export default function ProductDetailModal({ product, onClose, onAddToCart, cartItem, onUpdateCartQty }) {
-  if (!product) return null;
-
   const currentQty = cartItem ? cartItem.quantity : 1;
   const [qty, setQty] = useState(currentQty || 1);
   const [ratingSummary, setRatingSummary] = useState(null);
+
+  if (!product) return null;
+
   const isOutOfStock = !product.available || product.stock <= 0;
   const displayAvg = ratingSummary?.average ?? product.avgRating ?? 0;
   const displayTotal = ratingSummary?.total ?? product.totalReviews ?? 0;

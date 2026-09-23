@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { query } = require('../db');
 
 // PENTING: Wajib set JWT_SECRET di production melalui env variable.
 const JWT_SECRET = process.env.JWT_SECRET || 'freshmarket-dev-secret-change-me-in-production';
@@ -12,7 +13,7 @@ function signToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
-function verifyToken(req, res, next) {
+async function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
@@ -20,12 +21,32 @@ function verifyToken(req, res, next) {
     return res.status(401).json({ message: 'Token tidak ditemukan. Silakan login terlebih dahulu.' });
   }
 
+  let decoded;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { id, email, role, name }
-    next();
+    decoded = jwt.verify(token, JWT_SECRET);
   } catch (err) {
     return res.status(401).json({ message: 'Token tidak valid atau sudah kadaluarsa. Silakan login ulang.' });
+  }
+
+  try {
+    const result = await query(
+      'SELECT id, email, role, name FROM users WHERE id = $1',
+      [decoded.id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(401).json({ message: 'Akun tidak ditemukan atau sudah dihapus. Silakan login kembali.' });
+    }
+
+    if (decoded.role !== result.rows[0].role) {
+      return res.status(401).json({ message: 'Role akun berubah. Silakan login kembali untuk memperbarui sesi.' });
+    }
+
+    // Role dan identitas selalu mengikuti keadaan terbaru di database, bukan klaim token lama.
+    req.user = { ...decoded, ...result.rows[0] };
+    next();
+  } catch (err) {
+    console.error('[Auth] Gagal memeriksa sesi:', err.message);
+    return res.status(503).json({ message: 'Sesi tidak dapat diverifikasi saat ini. Coba lagi.' });
   }
 }
 
@@ -37,7 +58,7 @@ function requireAdmin(req, res, next) {
 }
 
 // Optional auth: lampirkan user jika ada token, tapi tidak wajib
-function optionalAuth(req, res, next) {
+async function optionalAuth(req, res, next) {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
@@ -46,11 +67,24 @@ function optionalAuth(req, res, next) {
     return next();
   }
 
+  let decoded;
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch {
+    req.user = null;
+    return next();
+  }
+
+  try {
+    const result = await query(
+      'SELECT id, email, role, name FROM users WHERE id = $1',
+      [decoded.id]
+    );
+    req.user = result.rows[0] ? { ...decoded, ...result.rows[0] } : null;
   } catch {
     req.user = null;
   }
+
   next();
 }
 

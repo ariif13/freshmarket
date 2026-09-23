@@ -384,6 +384,7 @@ export default function App() {
       />
 
       <ProductDetailModal
+        key={detailProduct?.id || 'closed'}
         product={detailProduct}
         onClose={() => setDetailProduct(null)}
         cartItem={cart.find((i) => i.id === detailProduct?.id)}

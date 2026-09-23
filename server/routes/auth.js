@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const { randomBytes } = require('crypto');
 const { query, mapUser } = require('../db');
 const { signToken, verifyToken } = require('../middleware/auth');
 const {
@@ -44,7 +45,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const id = 'user-' + Date.now();
+    const id = `user-${Date.now()}-${randomBytes(4).toString('hex')}`;
 
     const result = await query(
       `INSERT INTO users (id, name, email, password_hash, phone, address, role)

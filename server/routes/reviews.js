@@ -1,4 +1,5 @@
 const express = require('express');
+const { randomBytes } = require('crypto');
 const { query, mapReview } = require('../db');
 const { verifyToken, requireAdmin } = require('../middleware/auth');
 
@@ -128,7 +129,7 @@ router.post('/', verifyToken, async (req, res) => {
       });
     }
 
-    const id = 'rev-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    const id = `rev-${Date.now()}-${randomBytes(4).toString('hex')}`;
     const inserted = await query(
       `INSERT INTO reviews (id, product_id, product_name, user_id, user_name, rating, comment, order_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,

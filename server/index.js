@@ -4,6 +4,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const { randomBytes } = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const {
@@ -83,14 +84,20 @@ app.post('/api/upload', verifyToken, requireAdmin, async (req, res) => {
     let buffer, mime = 'image/jpeg', ext = 'jpg';
 
     if (matches && matches.length === 3) {
-      mime = matches[1];
-      if (mime.includes('png')) ext = 'png';
-      else if (mime.includes('webp')) ext = 'webp';
-      else if (mime.includes('gif')) ext = 'gif';
+      mime = matches[1].toLowerCase();
+      const mimeToExtension = {
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'image/gif': 'gif'
+      };
+      ext = mimeToExtension[mime];
+      if (!ext) return res.status(400).json({ message: 'Format gambar tidak didukung.' });
       buffer = Buffer.from(matches[2], 'base64');
     } else {
       buffer = Buffer.from(image, 'base64');
-      if (filename && filename.includes('.')) ext = filename.split('.').pop();
+      if (filename && filename.includes('.')) ext = path.extname(filename).slice(1).toLowerCase();
     }
 
     // Validasi tipe
@@ -103,7 +110,7 @@ app.post('/api/upload', verifyToken, requireAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Ukuran gambar maksimal 5MB.' });
     }
 
-    const id = 'upload-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+    const id = 'upload-' + Date.now() + '-' + randomBytes(4).toString('hex');
     const safeName = `${id}.${ext}`;
     await query(
       `INSERT INTO uploads (id, filename, mime_type, data, size_bytes) VALUES ($1, $2, $3, $4, $5)`,
@@ -136,7 +143,7 @@ app.post('/api/categories', verifyToken, requireAdmin, async (req, res) => {
 
     const cleanName = name.trim();
     let id = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    if (!id || id === 'semua') id = 'cat-' + Date.now();
+    if (!id || id === 'semua') id = `cat-${Date.now()}-${randomBytes(4).toString('hex')}`;
 
     const dup = await query(
       `SELECT 1 FROM categories WHERE id = $1 OR LOWER(name) = LOWER($2)`,
@@ -176,6 +183,13 @@ app.delete('/api/categories/:id', verifyToken, requireAdmin, async (req, res) =>
   if (req.params.id === 'semua') {
     return res.status(400).json({ message: 'Kategori utama tidak dapat dihapus' });
   }
+  const usage = await query('SELECT COUNT(*)::int AS count FROM products WHERE category = $1', [req.params.id]);
+  if (usage.rows[0].count > 0) {
+    return res.status(409).json({
+      message: `Kategori masih digunakan oleh ${usage.rows[0].count} produk. Pindahkan produk tersebut sebelum menghapus kategori.`
+    });
+  }
+
   const r = await query('DELETE FROM categories WHERE id = $1 RETURNING id', [req.params.id]);
   if (r.rowCount === 0) return res.status(404).json({ message: 'Kategori tidak ditemukan' });
   res.json({ message: 'Kategori berhasil dihapus' });
@@ -238,20 +252,34 @@ app.get('/api/products/:id', async (req, res) => {
 app.post('/api/products', verifyToken, requireAdmin, async (req, res) => {
   try {
     const { name, category, price, unit, stock, description, image, badge, organic, available } = req.body;
-    if (!name || price === undefined) {
+    if (typeof name !== 'string' || !name.trim() || price === undefined) {
       return res.status(400).json({ message: 'Nama dan harga wajib diisi' });
     }
-    const id = 'prod-' + Date.now();
+    const priceValue = Number(price);
+    const stockValue = stock === undefined ? 0 : Number(stock);
+    if (!Number.isFinite(priceValue) || priceValue < 0) {
+      return res.status(400).json({ message: 'Harga harus berupa angka nol atau lebih.' });
+    }
+    if (!Number.isSafeInteger(stockValue) || stockValue < 0) {
+      return res.status(400).json({ message: 'Stok harus berupa bilangan bulat nol atau lebih.' });
+    }
+    const categoryId = category || 'sayur-mayur';
+    const categoryResult = await query('SELECT 1 FROM categories WHERE id = $1', [categoryId]);
+    if (categoryResult.rowCount === 0) {
+      return res.status(400).json({ message: 'Kategori produk tidak ditemukan.' });
+    }
+
+    const id = `prod-${Date.now()}-${randomBytes(4).toString('hex')}`;
     const result = await query(
       `INSERT INTO products (id, name, category, price, unit, stock, description, image, badge, organic, available)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
       [
         id,
         name.trim(),
-        category || 'sayur-mayur',
-        Number(price),
+        categoryId,
+        priceValue,
         unit || 'ikat',
-        Number(stock) || 0,
+        stockValue,
         description || '',
         image || 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=600&q=80',
         badge || '',
@@ -272,6 +300,22 @@ app.put('/api/products/:id', verifyToken, requireAdmin, async (req, res) => {
     if (existing.rowCount === 0) return res.status(404).json({ message: 'Produk tidak ditemukan' });
     const cur = mapProduct(existing.rows[0]);
     const b = req.body;
+
+    if (b.name !== undefined && (typeof b.name !== 'string' || !b.name.trim())) {
+      return res.status(400).json({ message: 'Nama produk tidak boleh kosong.' });
+    }
+    if (b.price !== undefined && (!Number.isFinite(Number(b.price)) || Number(b.price) < 0)) {
+      return res.status(400).json({ message: 'Harga harus berupa angka nol atau lebih.' });
+    }
+    if (b.stock !== undefined && (!Number.isSafeInteger(Number(b.stock)) || Number(b.stock) < 0)) {
+      return res.status(400).json({ message: 'Stok harus berupa bilangan bulat nol atau lebih.' });
+    }
+    if (b.category !== undefined) {
+      const categoryResult = await query('SELECT 1 FROM categories WHERE id = $1', [b.category]);
+      if (categoryResult.rowCount === 0) {
+        return res.status(400).json({ message: 'Kategori produk tidak ditemukan.' });
+      }
+    }
 
     const result = await query(
       `UPDATE products SET
@@ -330,33 +374,64 @@ app.get('/api/orders', verifyToken, async (req, res) => {
 app.post('/api/orders', verifyToken, async (req, res) => {
   try {
     const { customerName, customerPhone, address, deliverySlot, paymentMethod, notes, items } = req.body;
-    if (!customerName || !customerPhone || !address || !items || !items.length) {
+    if (
+      typeof customerName !== 'string' || !customerName.trim() ||
+      typeof customerPhone !== 'string' || !customerPhone.trim() ||
+      typeof address !== 'string' || !address.trim() ||
+      !Array.isArray(items) || items.length === 0 || items.length > 50
+    ) {
       return res.status(400).json({ message: 'Mohon lengkapi data pemesan dan item keranjang belanja' });
+    }
+
+    const requestedItems = [];
+    const seenIds = new Set();
+    for (const item of items) {
+      const productId = typeof item?.id === 'string' ? item.id.trim() : '';
+      const quantity = Number(item?.quantity);
+      if (!productId || productId.length > 64) {
+        return res.status(400).json({ message: 'Item keranjang memiliki ID produk yang tidak valid.' });
+      }
+      if (seenIds.has(productId)) {
+        return res.status(400).json({ message: 'Produk yang sama tidak boleh muncul lebih dari sekali di keranjang.' });
+      }
+      if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+        return res.status(400).json({ message: 'Jumlah setiap produk harus berupa bilangan bulat lebih dari nol.' });
+      }
+      seenIds.add(productId);
+      requestedItems.push({ productId, quantity });
     }
 
     const result = await tx(async (client) => {
       let itemsTotal = 0;
       const processedItems = [];
 
-      for (const item of items) {
-        const pr = await client.query('SELECT * FROM products WHERE id = $1', [item.id]);
+      for (const item of requestedItems) {
+        const pr = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [item.productId]);
         const product = pr.rows[0];
-        const price = product ? Number(product.price) : (item.price || 0);
-        const unit = product ? product.unit : (item.unit || '');
-        const name = product ? product.name : (item.name || 'Produk');
-        const qty = Number(item.quantity) || 1;
+        if (!product) {
+          const error = new Error('Salah satu produk di keranjang sudah tidak tersedia. Muat ulang katalog.');
+          error.status = 409;
+          throw error;
+        }
+        if (!product.available || product.stock < item.quantity) {
+          const error = new Error(`Stok ${product.name} tidak mencukupi. Stok tersedia: ${product.stock}.`);
+          error.status = 409;
+          throw error;
+        }
+
+        const price = Number(product.price);
+        const unit = product.unit;
+        const name = product.name;
+        const qty = item.quantity;
 
         itemsTotal += price * qty;
-        processedItems.push({ id: item.id, name, price, unit, quantity: qty });
+        processedItems.push({ id: item.productId, name, price, unit, quantity: qty });
 
-        if (product) {
-          const newStock = Math.max(0, product.stock - qty);
-          const newAvailable = newStock === 0 ? false : product.available;
-          await client.query(
-            `UPDATE products SET stock = $1, available = $2 WHERE id = $3`,
-            [newStock, newAvailable, product.id]
-          );
-        }
+        const newStock = product.stock - qty;
+        await client.query(
+          `UPDATE products SET stock = $1, available = $2 WHERE id = $3`,
+          [newStock, newStock > 0 && product.available, product.id]
+        );
       }
 
       // Ambil storeInfo untuk deliveryFee
@@ -367,8 +442,7 @@ app.post('/api/orders', verifyToken, async (req, res) => {
       const grandTotal = itemsTotal + deliveryFee;
 
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const randomSuffix = Math.floor(100 + Math.random() * 900);
-      const orderId = `ORD-${dateStr}-${randomSuffix}`;
+      const orderId = `ORD-${dateStr}-${randomBytes(6).toString('hex').toUpperCase()}`;
 
       const insertRes = await client.query(
         `INSERT INTO orders (
@@ -392,6 +466,9 @@ app.post('/api/orders', verifyToken, async (req, res) => {
 
     res.status(201).json(result);
   } catch (err) {
+    if (err.status === 409) {
+      return res.status(409).json({ message: err.message });
+    }
     console.error('Order create error:', err);
     res.status(500).json({ message: 'Gagal membuat pesanan: ' + err.message });
   }
@@ -404,12 +481,59 @@ app.patch('/api/orders/:id/status', verifyToken, requireAdmin, async (req, res) 
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ message: 'Status tidak valid' });
   }
-  const r = await query(
-    `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
-    [status, req.params.id]
-  );
-  if (r.rowCount === 0) return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
-  res.json(mapOrder(r.rows[0]));
+
+  try {
+    const updatedOrder = await tx(async (client) => {
+      const current = await client.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [req.params.id]);
+      if (current.rowCount === 0) {
+        const error = new Error('Pesanan tidak ditemukan');
+        error.status = 404;
+        throw error;
+      }
+
+      const order = current.rows[0];
+      if (order.status === status) return mapOrder(order);
+
+      const nextStatus = {
+        'Menunggu Konfirmasi': ['Sedang Dikemas', 'Dibatalkan'],
+        'Sedang Dikemas': ['Sedang Dikirim', 'Dibatalkan'],
+        'Sedang Dikirim': ['Selesai', 'Dibatalkan'],
+        'Selesai': [],
+        'Dibatalkan': []
+      };
+      if (!nextStatus[order.status]?.includes(status)) {
+        const error = new Error(`Perubahan status dari "${order.status}" ke "${status}" tidak diizinkan.`);
+        error.status = 409;
+        throw error;
+      }
+
+      if (status === 'Dibatalkan') {
+        for (const item of order.items || []) {
+          const quantity = Number(item.quantity);
+          if (!item.id || !Number.isSafeInteger(quantity) || quantity <= 0) continue;
+          await client.query(
+            `UPDATE products
+             SET stock = stock + $1,
+                 available = CASE WHEN stock = 0 THEN true ELSE available END
+             WHERE id = $2`,
+            [quantity, item.id]
+          );
+        }
+      }
+
+      const updated = await client.query(
+        `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+        [status, req.params.id]
+      );
+      return mapOrder(updated.rows[0]);
+    });
+
+    res.json(updatedOrder);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
+    console.error('Order status update error:', err);
+    res.status(500).json({ message: 'Gagal memperbarui status pesanan.' });
+  }
 });
 
 // -------------------------------------------------------------

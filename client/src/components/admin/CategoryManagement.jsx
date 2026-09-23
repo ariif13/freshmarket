@@ -101,10 +101,12 @@ export default function CategoryManagement({ categories, onCategoriesChange, pro
     }
 
     const count = (products || []).filter(p => p.category === cat.id).length;
-    let confirmMsg = `Yakin ingin menghapus kategori "${cat.name}"?`;
     if (count > 0) {
-      confirmMsg = `Kategori "${cat.name}" saat ini memiliki ${count} produk terdaftar. Yakin ingin menghapus kategori ini?`;
+      alert(`Kategori "${cat.name}" masih dipakai oleh ${count} produk. Pindahkan produk tersebut sebelum menghapus kategori.`);
+      return;
     }
+
+    let confirmMsg = `Yakin ingin menghapus kategori "${cat.name}"?`;
 
     if (!confirm(confirmMsg)) return;
 

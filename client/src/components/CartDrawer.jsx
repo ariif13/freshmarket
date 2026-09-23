@@ -133,6 +133,7 @@ export default function CartDrawer({
                       </span>
                       <button
                         onClick={() => onUpdateQty(item.id, item.quantity + 1)}
+                        disabled={Number.isFinite(item.stock) && item.quantity >= item.stock}
                         className="w-6 h-6 flex items-center justify-center text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-r"
                       >
                         <Plus className="w-3 h-3" />

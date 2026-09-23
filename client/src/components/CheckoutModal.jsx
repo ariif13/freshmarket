@@ -26,8 +26,6 @@ export default function CheckoutModal({
   isSubmitting,
   currentUser
 }) {
-  if (!isOpen) return null;
-
   const [formData, setFormData] = useState({
     customerName: currentUser?.name || '',
     customerPhone: currentUser?.phone || '',
@@ -36,24 +34,28 @@ export default function CheckoutModal({
     paymentMethod: 'COD (Bayar di Tempat)',
     notes: ''
   });
+  const [formErrors, setFormErrors] = useState({});
 
-  // Sinkronkan pre-fill saat user login berubah
+  // Reset dan isi kembali data penerima setiap checkout dibuka.
   useEffect(() => {
-    if (currentUser) {
-      setFormData((prev) => ({
-        ...prev,
-        customerName: prev.customerName || currentUser.name || '',
-        customerPhone: prev.customerPhone || currentUser.phone || '',
-        address: prev.address || currentUser.address || ''
-      }));
-    }
-  }, [currentUser]);
+    if (!isOpen) return;
+
+    setFormData({
+      customerName: currentUser?.name || '',
+      customerPhone: currentUser?.phone || '',
+      address: currentUser?.address || '',
+      deliverySlot: storeInfo?.deliverySlots?.[0]?.label || 'Pengiriman Pagi 1 (06.00 - 08.00 WIB)',
+      paymentMethod: 'COD (Bayar di Tempat)',
+      notes: ''
+    });
+    setFormErrors({});
+  }, [isOpen, currentUser, storeInfo]);
 
   // Indikator apakah alamat berasal dari profil (belum diedit)
   const isAddressFromProfile = currentUser?.address &&
     formData.address.trim() === currentUser.address.trim();
 
-  const [formErrors, setFormErrors] = useState({});
+  if (!isOpen) return null;
 
   const itemsTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const freeMin = storeInfo?.freeDeliveryMin || 150000;
