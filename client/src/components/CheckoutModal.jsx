@@ -15,7 +15,7 @@ import { api, formatRupiah } from '../services/api';
 import { deliveryMapUrl, formatDistance } from '../services/shipping';
 import PaymentInstructions from './PaymentInstructions';
 import DeliveryDetails from './DeliveryDetails';
-import LazyMap from './LazyMap';
+import LocationPicker from './LocationPicker';
 
 const PAYMENT_ICONS = { cod: Banknote, qris: QrCode, transfer: Building2 };
 
@@ -302,7 +302,7 @@ export default function CheckoutModal({
 
           {distanceEnabled && (
             <div className="border-t border-slate-100 pt-4 space-y-3">
-              <LazyMap label="Lokasi pengiriman" value={deliveryLocation} onChange={setDeliveryLocation} origin={checkoutInfo.shippingSettings.storeLocation}
+              <LocationPicker label="Lokasi pengiriman" value={deliveryLocation} onChange={setDeliveryLocation} origin={checkoutInfo.shippingSettings.storeLocation}
                 radiusKm={checkoutInfo.shippingSettings.tiers.at(-1)?.upToKm} freeRadiusKm={checkoutInfo.shippingSettings.freeDeliveryRadiusKm} disabled={isSubmitting} />
               <p className="text-xs text-slate-600">Gratis ongkir: belanja minimal {formatRupiah(checkoutInfo.freeDeliveryMin ?? 150000)}, radius maksimal {checkoutInfo.shippingSettings.freeDeliveryRadiusKm} km.</p>
               {needsLocation && <p className="text-xs text-amber-800">Pilih pin alamat tujuan untuk menghitung ongkir.</p>}
