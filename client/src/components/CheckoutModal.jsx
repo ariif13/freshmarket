@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Send, 
@@ -15,8 +15,7 @@ import { api, formatRupiah } from '../services/api';
 import { deliveryMapUrl, formatDistance } from '../services/shipping';
 import PaymentInstructions from './PaymentInstructions';
 import DeliveryDetails from './DeliveryDetails';
-
-const LocationPicker = lazy(() => import('./LocationPicker'));
+import LazyMap from './LazyMap';
 
 const PAYMENT_ICONS = { cod: Banknote, qris: QrCode, transfer: Building2 };
 
@@ -303,10 +302,8 @@ export default function CheckoutModal({
 
           {distanceEnabled && (
             <div className="border-t border-slate-100 pt-4 space-y-3">
-              <Suspense fallback={<p className="h-64 flex items-center justify-center text-xs text-slate-500">Memuat peta pengiriman…</p>}>
-                <LocationPicker label="Lokasi pengiriman" value={deliveryLocation} onChange={setDeliveryLocation} origin={checkoutInfo.shippingSettings.storeLocation}
-                  radiusKm={checkoutInfo.shippingSettings.tiers.at(-1)?.upToKm} freeRadiusKm={checkoutInfo.shippingSettings.freeDeliveryRadiusKm} disabled={isSubmitting} />
-              </Suspense>
+              <LazyMap label="Lokasi pengiriman" value={deliveryLocation} onChange={setDeliveryLocation} origin={checkoutInfo.shippingSettings.storeLocation}
+                radiusKm={checkoutInfo.shippingSettings.tiers.at(-1)?.upToKm} freeRadiusKm={checkoutInfo.shippingSettings.freeDeliveryRadiusKm} disabled={isSubmitting} />
               <p className="text-xs text-slate-600">Gratis ongkir: belanja minimal {formatRupiah(checkoutInfo.freeDeliveryMin ?? 150000)}, radius maksimal {checkoutInfo.shippingSettings.freeDeliveryRadiusKm} km.</p>
               {needsLocation && <p className="text-xs text-amber-800">Pilih pin alamat tujuan untuk menghitung ongkir.</p>}
             </div>

@@ -21,7 +21,8 @@ Pengaturan awal belum aktif sampai admin menentukan lokasi toko dan mengaktifkan
 
 ## Deployment
 
-- Jalankan `npm --prefix client install` dan `npm --prefix client run build`; restart backend untuk migrasi `005_order_delivery_details.sql`.
+- **Wajib setelah `git pull`**: `npm --prefix client install` (pasang leaflet), lalu `npm --prefix client run build`, lalu restart backend untuk migrasi `005_order_delivery_details.sql`. `client/dist` tidak ikut ter-commit — tanpa build, chunk peta (`LocationPicker-*.js`) tidak ada dan peta tidak tampil.
+- Jika peta macet di "Memuat peta…", cek DevTools → Network: request `LocationPicker-*.js` harus `200` + `application/javascript`. Bila `404`, build ulang frontend. UI tetap bisa memasukkan koordinat manual + tombol coba lagi sampai peta dimuat ulang.
 - Peta menggunakan Leaflet dengan tile OpenStreetMap serta atribusi terlihat. Tile hanya dimuat untuk tampilan aktif dengan caching normal browser, tanpa unduhan offline/prefetch.
 - Penyedia peta dapat diubah melalui `VITE_MAP_TILE_URL` dan `VITE_MAP_ATTRIBUTION` sebelum build (contoh di `client/.env.example`). Ikuti ketentuan layanan penyedia tile; layanan publik OSM bersifat best-effort.
 - Tombol lokasi perangkat memerlukan HTTPS (atau localhost) dan izin lokasi browser. Pelanggan dapat memilih pin atau memasukkan koordinat jika GPS tidak tersedia.

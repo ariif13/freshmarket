@@ -1,8 +1,7 @@
-import { lazy, Suspense } from 'react';
-import { Plus, Trash2, Truck } from 'lucide-react';
+import { Trash2, Truck, Plus } from 'lucide-react';
 import { formatRupiah } from '../../services/api';
+import LazyMap from '../LazyMap';
 
-const LocationPicker = lazy(() => import('../LocationPicker'));
 const inputClass = 'block w-full mt-1 px-3 py-2.5 rounded-xl border border-slate-200 bg-white outline-none focus:border-emerald-500';
 
 export default function DeliverySettings({ settings, deliveryFee, freeDeliveryMin, onChange, onFeeChange, onFreeMinChange, disabled = false }) {
@@ -25,9 +24,7 @@ export default function DeliverySettings({ settings, deliveryFee, freeDeliveryMi
           <input className={inputClass} type="number" min="0" max="1000000000" step="1" required value={freeDeliveryMin} onChange={(e) => onFreeMinChange(e.target.value)} />
         </label>
       </div>
-      <Suspense fallback={<p className="h-64 flex items-center justify-center text-slate-500">Memuat peta toko…</p>}>
-        <LocationPicker label="Lokasi toko" value={settings.storeLocation} onChange={(point) => update('storeLocation', point)} radiusKm={maxKm} freeRadiusKm={Number(settings.freeDeliveryRadiusKm)} disabled={disabled} />
-      </Suspense>
+      <LazyMap label="Lokasi toko" value={settings.storeLocation} onChange={(point) => update('storeLocation', point)} radiusKm={maxKm} freeRadiusKm={Number(settings.freeDeliveryRadiusKm)} disabled={disabled} />
       <p className="text-slate-500">Tentukan lokasi toko sebelum mengaktifkan ongkir jarak. Lingkaran peta menunjukkan area layanan dan area gratis ongkir.</p>
       <div className="space-y-3">
         <h5 className="font-bold">Rentang Jarak & Tarif</h5>

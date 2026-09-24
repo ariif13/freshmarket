@@ -914,7 +914,11 @@ if (NODE_ENV === 'production') {
     app.use(express.static(staticDir, { maxAge: '1d', index: false }));
 
     // SPA fallback - semua non-API route ke index.html
+    // Asset build yang hilang harus 404 (bukan index.html) agar kegagalan chunk jelas terlihat.
     app.get(/^\/(?!api\/|uploads\/).*/, (req, res) => {
+      if (req.path.startsWith('/assets/')) {
+        return res.status(404).type('text/plain').send('Asset not found. Jalankan ulang npm --prefix client run build.');
+      }
       res.sendFile(path.join(staticDir, 'index.html'));
     });
   } else {
