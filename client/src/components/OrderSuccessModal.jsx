@@ -2,6 +2,7 @@ import React from 'react';
 import { CheckCircle2, MessageSquare, Receipt } from 'lucide-react';
 import { formatRupiah } from '../services/api';
 import PaymentInstructions from './PaymentInstructions';
+import DeliveryDetails from './DeliveryDetails';
 
 export default function OrderSuccessModal({ order, onClose, onViewMyOrders, storeInfo }) {
   if (!order) return null;
@@ -55,6 +56,7 @@ export default function OrderSuccessModal({ order, onClose, onViewMyOrders, stor
           </div>
         </div>
 
+        {order.deliveryDetails?.mode === 'distance' && <div className="mb-5"><DeliveryDetails details={order.deliveryDetails} /></div>}
         {order.paymentDetails && (
           <div className="mb-5">
             <PaymentInstructions payment={order.paymentDetails} />

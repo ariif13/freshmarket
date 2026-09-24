@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import DeliveryDetails from '../DeliveryDetails';
 import { 
   ShoppingBag, 
   Clock, 
@@ -162,6 +163,7 @@ export default function OrderManagement() {
                 </div>
               </div>
 
+              <DeliveryDetails details={order.deliveryDetails} />
               {/* Order Items preview */}
               {order.paymentDetails && (
                 <details className="text-xs">

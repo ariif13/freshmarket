@@ -14,8 +14,9 @@ const {
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const { router: reviewRoutes, computeProductRating } = require('./routes/reviews');
-const { verifyToken, requireAdmin } = require('./middleware/auth');
+const { verifyToken, requireAdmin, JWT_SECRET } = require('./middleware/auth');
 const { getPaymentMethods, normalizePaymentMethods, selectPaymentMethod } = require('./payments');
+const { getShippingSettings, normalizeShippingSettings, normalizeMoney, createDeliveryQuote } = require('./shipping');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -616,9 +617,70 @@ app.get('/api/orders', verifyToken, async (req, res) => {
   res.json(r.rows.map(mapOrder));
 });
 
+function normalizeOrderItems(items) {
+  if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
+    throw httpError(400, 'Keranjang wajib memuat 1 hingga 50 item.');
+  }
+  const seen = new Set();
+  return items.map((item) => {
+    const productId = typeof item?.id === 'string' ? item.id.trim() : '';
+    const variantId = typeof item?.variantId === 'string' ? item.variantId.trim() : '';
+    const quantity = Number(item?.quantity);
+    if (!productId || productId.length > 64 || variantId.length > 64 || !Number.isSafeInteger(quantity) || quantity <= 0) {
+      throw httpError(400, 'Produk, varian, atau jumlah item keranjang tidak valid.');
+    }
+    const key = `${productId}:${variantId}`;
+    if (seen.has(key)) throw httpError(400, 'Produk atau varian yang sama tidak boleh muncul dua kali.');
+    seen.add(key);
+    return { productId, variantId, quantity };
+  });
+}
+
+// Estimasi dan checkout menggunakan harga/varian yang sama dari database.
+async function priceOrderItems(client, requestedItems, lockStock = false) {
+  const ids = [...new Set(requestedItems.map((item) => item.productId))];
+  const products = lockStock ? await lockProducts(client, ids) : new Map(
+    (await client.query('SELECT * FROM products WHERE id = ANY($1::varchar[])', [ids])).rows.map((row) => [row.id, row])
+  );
+  const variants = (await client.query(
+    `SELECT * FROM product_variants WHERE product_id = ANY($1::varchar[]) ORDER BY product_id, id${lockStock ? ' FOR UPDATE' : ''}`, [ids]
+  )).rows;
+  return requestedItems.map(({ productId, variantId, quantity }) => {
+    const product = products.get(productId);
+    if (!product || !product.available) throw httpError(409, 'Salah satu produk sudah tidak tersedia. Muat ulang katalog.');
+    const productVariants = variants.filter((variant) => variant.product_id === productId);
+    const variant = variantId ? productVariants.find((entry) => entry.id === variantId) : null;
+    if (variantId && !variant) throw httpError(409, `Varian ${product.name} sudah tidak tersedia. Muat ulang katalog.`);
+    if (!variantId && productVariants.length) throw httpError(409, `Pilih varian untuk ${product.name} sebelum checkout.`);
+    const selected = variant || product;
+    if (!selected.available || selected.stock < quantity) {
+      throw httpError(409, `Stok ${product.name}${variant ? ` - ${variant.name}` : ''} tidak mencukupi. Stok tersedia: ${selected.stock}.`);
+    }
+    return { id: product.id, name: product.name, price: Number(selected.price), unit: selected.unit, quantity,
+      ...(variant ? { variantId: variant.id, variantName: variant.name } : {}) };
+  });
+}
+
+app.post('/api/shipping/quote', verifyToken, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const requested = normalizeOrderItems(req.body?.items);
+    const quote = await tx(async (client) => {
+      const si = await client.query('SELECT data FROM store_info WHERE id = 1 FOR SHARE');
+      const items = await priceOrderItems(client, requested);
+      return createDeliveryQuote(si.rows[0]?.data || {}, items, req.body.deliveryLocation, req.user.id, JWT_SECRET);
+    });
+    res.json(quote);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message, code: err.code });
+    console.error('Shipping quote error:', err.message);
+    res.status(500).json({ message: 'Gagal menghitung ongkir. Silakan coba lagi.' });
+  }
+});
+
 app.post('/api/orders', verifyToken, async (req, res) => {
   try {
-    const { customerName, customerPhone, address, deliverySlot, paymentMethodId, paymentMethod, notes, items } = req.body;
+    const { customerName, customerPhone, address, deliverySlot, paymentMethodId, paymentMethod, notes, items, deliveryLocation, shippingQuoteToken } = req.body;
     if (
       typeof customerName !== 'string' || !customerName.trim() ||
       typeof customerPhone !== 'string' || !customerPhone.trim() ||
@@ -628,124 +690,40 @@ app.post('/api/orders', verifyToken, async (req, res) => {
       return res.status(400).json({ message: 'Mohon lengkapi data pemesan dan item keranjang belanja' });
     }
 
-    const requestedItems = [];
-    const seenIds = new Set();
-    for (const item of items) {
-      const productId = typeof item?.id === 'string' ? item.id.trim() : '';
-      const variantId = typeof item?.variantId === 'string' ? item.variantId.trim() : '';
-      const quantity = Number(item?.quantity);
-      if (!productId || productId.length > 64) {
-        return res.status(400).json({ message: 'Item keranjang memiliki ID produk yang tidak valid.' });
-      }
-      if (variantId.length > 64) {
-        return res.status(400).json({ message: 'ID varian produk tidak valid.' });
-      }
-      const itemKey = `${productId}:${variantId || 'produk'}`;
-      if (seenIds.has(itemKey)) {
-        return res.status(400).json({ message: 'Produk atau varian yang sama tidak boleh muncul lebih dari sekali di keranjang.' });
-      }
-      if (!Number.isSafeInteger(quantity) || quantity <= 0) {
-        return res.status(400).json({ message: 'Jumlah setiap produk harus berupa bilangan bulat lebih dari nol.' });
-      }
-      seenIds.add(itemKey);
-      requestedItems.push({ productId, variantId, quantity });
-    }
+    const requestedItems = normalizeOrderItems(items);
 
     const result = await tx(async (client) => {
       const si = await client.query('SELECT data FROM store_info WHERE id = 1 FOR SHARE');
       const storeInfo = si.rows[0]?.data || {};
       const selectedPayment = selectPaymentMethod(storeInfo, paymentMethodId, paymentMethod);
-      const lockedProducts = await lockProducts(client, requestedItems.map((item) => item.productId));
-      let itemsTotal = 0;
-      const processedItems = [];
+      const processedItems = await priceOrderItems(client, requestedItems, true);
+      const quote = createDeliveryQuote(storeInfo, processedItems, deliveryLocation, req.user.id, JWT_SECRET);
+      if ((quote.deliveryDetails.mode === 'distance' || shippingQuoteToken !== undefined) && shippingQuoteToken !== quote.quoteToken) {
+        throw Object.assign(httpError(409, 'Tarif atau harga berubah. Periksa ringkasan biaya terbaru sebelum memesan kembali.'), {
+          code: 'SHIPPING_QUOTE_CHANGED', quote
+        });
+      }
+      const { itemsTotal, deliveryFee, grandTotal, deliveryDetails } = quote;
       const variantProductIds = new Set();
 
-      for (const item of requestedItems) {
-        const product = lockedProducts.get(item.productId);
-        if (!product) {
-          const error = new Error('Salah satu produk di keranjang sudah tidak tersedia. Muat ulang katalog.');
-          error.status = 409;
-          throw error;
-        }
-        if (!product.available) {
-          const error = new Error(`${product.name} sedang tidak tersedia.`);
-          error.status = 409;
-          throw error;
-        }
-
-        let price;
-        let unit;
-        let variantName;
-
+      for (const item of processedItems) {
         if (item.variantId) {
-          const variantResult = await client.query(
-            'SELECT * FROM product_variants WHERE id = $1 AND product_id = $2 FOR UPDATE',
-            [item.variantId, product.id]
-          );
-          const variant = variantResult.rows[0];
-          if (!variant) {
-            const error = new Error(`Varian ${product.name} sudah tidak tersedia. Muat ulang katalog.`);
-            error.status = 409;
-            throw error;
-          }
-          if (!variant.available || variant.stock < item.quantity) {
-            const error = new Error(`Stok varian ${variant.name} untuk ${product.name} tidak mencukupi. Stok tersedia: ${variant.stock}.`);
-            error.status = 409;
-            throw error;
-          }
-
-          price = Number(variant.price);
-          unit = variant.unit;
-          variantName = variant.name;
-          const newStock = variant.stock - item.quantity;
           await client.query(
-            `UPDATE product_variants SET stock = $1, available = $2, updated_at = NOW() WHERE id = $3`,
-            [newStock, newStock > 0 && variant.available, variant.id]
+            'UPDATE product_variants SET stock = stock - $1, available = (stock - $1 > 0), updated_at = NOW() WHERE id = $2',
+            [item.quantity, item.variantId]
           );
-          variantProductIds.add(product.id);
+          variantProductIds.add(item.id);
         } else {
-          const variantCount = await client.query(
-            'SELECT COUNT(*)::int AS count FROM product_variants WHERE product_id = $1',
-            [product.id]
-          );
-          if (variantCount.rows[0].count > 0) {
-            const error = new Error(`Pilih varian untuk ${product.name} sebelum checkout.`);
-            error.status = 409;
-            throw error;
-          }
-          if (product.stock < item.quantity) {
-            const error = new Error(`Stok ${product.name} tidak mencukupi. Stok tersedia: ${product.stock}.`);
-            error.status = 409;
-            throw error;
-          }
-
-          price = Number(product.price);
-          unit = product.unit;
-          const newStock = product.stock - item.quantity;
           await client.query(
-            `UPDATE products SET stock = $1, available = $2 WHERE id = $3`,
-            [newStock, newStock > 0 && product.available, product.id]
+            'UPDATE products SET stock = stock - $1, available = (stock - $1 > 0) WHERE id = $2',
+            [item.quantity, item.id]
           );
         }
-
-        itemsTotal += price * item.quantity;
-        processedItems.push({
-          id: product.id,
-          name: product.name,
-          price,
-          unit,
-          quantity: item.quantity,
-          ...(item.variantId ? { variantId: item.variantId, variantName } : {})
-        });
       }
 
       for (const productId of variantProductIds) {
         await syncProductVariantSummary(client, productId);
       }
-
-      const freeMin = storeInfo.freeDeliveryMin || 150000;
-      const deliveryFee = itemsTotal >= freeMin ? 0 : (storeInfo.deliveryFee || 8000);
-      const grandTotal = itemsTotal + deliveryFee;
 
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const orderId = `ORD-${dateStr}-${randomBytes(6).toString('hex').toUpperCase()}`;
@@ -753,8 +731,8 @@ app.post('/api/orders', verifyToken, async (req, res) => {
       const insertRes = await client.query(
         `INSERT INTO orders (
            id, user_id, user_email, customer_name, customer_phone, address,
-           delivery_slot, payment_method, notes, items, items_total, delivery_fee, grand_total, payment_details, status
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14::jsonb, 'Menunggu Konfirmasi')
+            delivery_slot, payment_method, notes, items, items_total, delivery_fee, grand_total, payment_details, delivery_details, status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14::jsonb, $15::jsonb, 'Menunggu Konfirmasi')
          RETURNING *`,
         [
           orderId, req.user.id, req.user.email,
@@ -763,7 +741,7 @@ app.post('/api/orders', verifyToken, async (req, res) => {
           selectedPayment.label,
           notes || '',
           JSON.stringify(processedItems),
-          itemsTotal, deliveryFee, grandTotal, JSON.stringify(selectedPayment)
+          itemsTotal, deliveryFee, grandTotal, JSON.stringify(selectedPayment), JSON.stringify(deliveryDetails)
         ]
       );
 
@@ -772,8 +750,8 @@ app.post('/api/orders', verifyToken, async (req, res) => {
 
     res.status(201).json(result);
   } catch (err) {
-    if (err.status === 409) {
-      return res.status(409).json({ message: err.message });
+    if (err.status) {
+      return res.status(err.status).json({ message: err.message, code: err.code, quote: err.quote });
     }
     console.error('Order create error:', err);
     res.status(500).json({ message: 'Gagal membuat pesanan: ' + err.message });
@@ -870,7 +848,7 @@ app.patch('/api/orders/:id/status', verifyToken, requireAdmin, async (req, res) 
 app.get('/api/store-info', async (req, res) => {
   const r = await query('SELECT data FROM store_info WHERE id = 1');
   const info = r.rows[0]?.data || {};
-  res.json({ ...info, paymentMethods: getPaymentMethods(info) });
+  res.json({ ...info, paymentMethods: getPaymentMethods(info), shippingSettings: getShippingSettings(info) });
 });
 
 app.put('/api/store-info', verifyToken, requireAdmin, async (req, res) => {
@@ -886,6 +864,9 @@ app.put('/api/store-info', verifyToken, requireAdmin, async (req, res) => {
         ...req.body,
         paymentMethods: paymentMethods || getPaymentMethods(curData)
       };
+      merged.shippingSettings = normalizeShippingSettings(req.body.shippingSettings ?? getShippingSettings(curData));
+      merged.deliveryFee = normalizeMoney(merged.deliveryFee ?? 8000, 'Ongkir standar');
+      merged.freeDeliveryMin = normalizeMoney(merged.freeDeliveryMin ?? 150000, 'Minimal belanja gratis ongkir');
       await client.query(
         `INSERT INTO store_info (id, data, updated_at) VALUES (1, $1, NOW())
          ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,

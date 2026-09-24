@@ -7,10 +7,12 @@ import {
   Layout, 
   Sliders, 
   CreditCard,
+  Truck,
   Eye
 } from 'lucide-react';
 import { api } from '../../services/api';
 import PaymentSettings from './PaymentSettings';
+import DeliverySettings from './DeliverySettings';
 
 const QUICK_EMOJIS = ['⏰', '🛵', '💵', '📲', '🥬', '🥦', '🚚', '⭐', '🛡️', '🧺', '🏷️', '🍳', '🥕', '🍗', '🌾', '💯'];
 
@@ -23,8 +25,13 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
     whatsapp: storeInfo?.whatsapp || '',
     address: storeInfo?.address || '',
     openHours: storeInfo?.openHours || '',
-    deliveryFee: storeInfo?.deliveryFee || 8000,
-    freeDeliveryMin: storeInfo?.freeDeliveryMin || 150000,
+    deliveryFee: storeInfo?.deliveryFee ?? 8000,
+    freeDeliveryMin: storeInfo?.freeDeliveryMin ?? 150000,
+    shippingSettings: storeInfo?.shippingSettings || {
+      enabled: false, storeLocation: null,
+      tiers: [{ upToKm: 3, fee: 5000 }, { upToKm: 5, fee: 8000 }, { upToKm: 10, fee: 12000 }],
+      freeDeliveryRadiusKm: 3
+    },
     paymentMethods: storeInfo?.paymentMethods || [],
     heroBanner: storeInfo?.heroBanner || {
       badge: 'Garansi Segar: Layu atau Rusak Kami Ganti 100%!',
@@ -95,11 +102,11 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
       setSaving(true);
       const updated = await api.updateStoreInfo({
         ...formData,
-        deliveryFee: Number(formData.deliveryFee),
-        freeDeliveryMin: Number(formData.freeDeliveryMin)
+        deliveryFee: formData.deliveryFee,
+        freeDeliveryMin: formData.freeDeliveryMin
       });
       onUpdateStoreInfo(updated);
-      setFormData((previous) => ({ ...previous, paymentMethods: updated.paymentMethods }));
+      setFormData((previous) => ({ ...previous, paymentMethods: updated.paymentMethods, shippingSettings: updated.shippingSettings, deliveryFee: updated.deliveryFee, freeDeliveryMin: updated.freeDeliveryMin }));
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
@@ -157,7 +164,10 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
           }`}
         >
           <Store className="w-4 h-4" />
-          <span>🏪 Profil Toko & Tarif Ongkir</span>
+          <span>🏪 Profil Toko</span>
+        </button>
+        <button type="button" onClick={() => setActiveSection('shipping')} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${activeSection === 'shipping' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'}`}>
+          <Truck className="w-4 h-4" /><span>Ongkir & Area Pengiriman</span>
         </button>
         <button
           type="button"
@@ -176,6 +186,18 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
       {error && <p role="alert" className="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-xl text-xs">{error}</p>}
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        <fieldset disabled={saving || uploadingPaymentImage} className="space-y-6 min-w-0 disabled:opacity-70">
+        {activeSection === 'shipping' && (
+          <DeliverySettings
+            disabled={saving || uploadingPaymentImage}
+            settings={formData.shippingSettings}
+            deliveryFee={formData.deliveryFee}
+            freeDeliveryMin={formData.freeDeliveryMin}
+            onChange={(shippingSettings) => setFormData((previous) => ({ ...previous, shippingSettings }))}
+            onFeeChange={(deliveryFee) => setFormData((previous) => ({ ...previous, deliveryFee }))}
+            onFreeMinChange={(freeDeliveryMin) => setFormData((previous) => ({ ...previous, freeDeliveryMin }))}
+          />
+        )}
         {activeSection === 'payments' && (
           <PaymentSettings
             methods={formData.paymentMethods}
@@ -406,7 +428,7 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
           <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 text-xs shadow-2xs">
             <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5 pb-2 border-b border-slate-100">
               <Store className="w-4 h-4 text-emerald-700" />
-              <span>Profil Kios & Tarif Pengiriman</span>
+              <span>Profil Kios</span>
             </h4>
 
             <div>
@@ -467,30 +489,10 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Tarif Ongkir Standar (Rp)</label>
-                <input
-                  type="number"
-                  value={formData.deliveryFee}
-                  onChange={(e) => setFormData({ ...formData, deliveryFee: e.target.value })}
-                  className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-emerald-500 outline-none font-bold text-slate-800"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Minimal Belanja Gratis Ongkir (Rp)</label>
-                <input
-                  type="number"
-                  value={formData.freeDeliveryMin}
-                  onChange={(e) => setFormData({ ...formData, freeDeliveryMin: e.target.value })}
-                  className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-emerald-500 outline-none font-bold text-emerald-800"
-                />
-              </div>
-            </div>
           </div>
         )}
 
+        </fieldset>
         {/* Submit Save Button */}
         <div className="pt-2 flex justify-end">
           <button

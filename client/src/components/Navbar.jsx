@@ -86,7 +86,7 @@ export default function Navbar({
       {/* Main Navbar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3 md:gap-6">
         {/* Brand */}
-        <div className="flex items-center gap-2.5 select-none">
+        <div className="flex items-center gap-2.5 select-none min-w-0 shrink">
           <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-md ${
             isAdmin
               ? 'bg-gradient-to-tr from-amber-500 to-orange-500 shadow-amber-500/30'
@@ -94,14 +94,14 @@ export default function Navbar({
           }`}>
             <span className="text-xl">{isAdmin ? '🛠️' : '🛒'}</span>
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <h1 className={`text-lg sm:text-xl font-black tracking-tight ${
+              <h1 className={`text-lg sm:text-xl font-black tracking-tight truncate ${
                 isAdmin ? 'text-white' : 'text-slate-900'
               }`}>
                 Fresh<span className={isAdmin ? 'text-amber-400' : 'text-emerald-600'}>Market</span>
               </h1>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${
+              <span className={`hidden sm:inline text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${
                 isAdmin
                   ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                   : 'bg-emerald-100 text-emerald-800 border-emerald-200'
@@ -140,7 +140,7 @@ export default function Navbar({
         )}
 
         {/* Right Controls */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Pesanan Saya quick-access (customer only) */}
           {!isAdmin && user?.role === 'customer' && currentView === 'store' && (
             <button
