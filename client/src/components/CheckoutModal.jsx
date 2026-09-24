@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Send, 
@@ -11,8 +11,11 @@ import {
   Building2,
   ShieldCheck
 } from 'lucide-react';
-import { formatRupiah } from '../services/api';
+import { api, formatRupiah } from '../services/api';
+import { deliveryMapUrl, formatDistance } from '../services/shipping';
 import PaymentInstructions from './PaymentInstructions';
+import DeliveryDetails from './DeliveryDetails';
+import LazyMap from './LazyMap';
 
 const PAYMENT_ICONS = { cod: Banknote, qris: QrCode, transfer: Building2 };
 
@@ -25,7 +28,8 @@ export default function CheckoutModal({
   isSubmitting,
   currentUser
 }) {
-  const paymentMethods = (storeInfo?.paymentMethods || []).filter((method) => method.enabled);
+  const [checkoutInfo, setCheckoutInfo] = useState(storeInfo);
+  const paymentMethods = (checkoutInfo?.paymentMethods || []).filter((method) => method.enabled);
   const [formData, setFormData] = useState({
     customerName: currentUser?.name || '',
     customerPhone: currentUser?.phone || '',
@@ -35,6 +39,12 @@ export default function CheckoutModal({
     notes: ''
   });
   const [formErrors, setFormErrors] = useState({});
+  const [deliveryLocation, setDeliveryLocation] = useState(null);
+  const [quoteState, setQuoteState] = useState({ key: '', data: null, error: '' });
+  const [retryQuote, setRetryQuote] = useState(0);
+  const [submitError, setSubmitError] = useState('');
+  const submittingRef = useRef(false);
+  const distanceEnabled = checkoutInfo?.shippingSettings?.enabled === true;
 
   // Reset dan isi kembali data penerima setiap checkout dibuka.
   useEffect(() => {
@@ -49,7 +59,42 @@ export default function CheckoutModal({
       notes: ''
     });
     setFormErrors({});
+    setCheckoutInfo(storeInfo);
+    setDeliveryLocation(null);
+    setQuoteState({ key: '', data: null, error: '' });
+    setSubmitError('');
   }, [isOpen, currentUser, storeInfo]);
+
+  // Batalkan estimasi lama segera saat keranjang atau pin berubah, sebelum efek berikutnya.
+  const quoteKey = JSON.stringify({
+    items: cart.map(({ id, variantId, quantity, price }) => ({ id, variantId, quantity, price })),
+    deliveryLocation, shippingSettings: checkoutInfo?.shippingSettings,
+    deliveryFee: checkoutInfo?.deliveryFee, freeDeliveryMin: checkoutInfo?.freeDeliveryMin
+  });
+  useEffect(() => {
+    if (!isOpen) return;
+    const payload = JSON.parse(quoteKey);
+    if (payload.shippingSettings?.enabled && !payload.deliveryLocation) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const data = await api.getShippingQuote({ items: payload.items, deliveryLocation: payload.deliveryLocation }, controller.signal);
+        if (controller.signal.aborted) return;
+        setQuoteState({ key: quoteKey, data, error: '' });
+        setCheckoutInfo((previous) => ({ ...previous, ...data.shippingConfig }));
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setQuoteState({ key: quoteKey, data: null, error: error.message });
+        if (error.code?.startsWith('SHIPPING_')) {
+          try {
+            const latest = await api.getStoreInfo();
+            if (!controller.signal.aborted) setCheckoutInfo(latest);
+          } catch { /* Pesan estimasi tetap ditampilkan; pengguna dapat mencoba lagi. */ }
+        }
+      }
+    }, 300);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [isOpen, quoteKey, retryQuote]);
 
   // Indikator apakah alamat berasal dari profil (belum diedit)
   const isAddressFromProfile = currentUser?.address &&
@@ -57,10 +102,12 @@ export default function CheckoutModal({
 
   if (!isOpen) return null;
 
-  const itemsTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const freeMin = storeInfo?.freeDeliveryMin || 150000;
-  const deliveryFee = itemsTotal >= freeMin ? 0 : (storeInfo?.deliveryFee || 8000);
-  const grandTotal = itemsTotal + deliveryFee;
+  const quote = quoteState.key === quoteKey ? quoteState.data : null;
+  const quoteError = quoteState.key === quoteKey ? quoteState.error : '';
+  const needsLocation = distanceEnabled && !deliveryLocation;
+  const itemsTotal = quote?.itemsTotal ?? cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const deliveryFee = quote?.deliveryFee;
+  const grandTotal = quote?.grandTotal;
   const selectedPayment = paymentMethods.find((method) => method.id === formData.paymentMethodId);
 
   const validate = () => {
@@ -73,32 +120,36 @@ export default function CheckoutModal({
     }
     if (!formData.address.trim()) errors.address = 'Alamat pengiriman wajib diisi';
     if (!selectedPayment) errors.paymentMethod = 'Pilih metode pembayaran yang tersedia.';
+    if (!quote) errors.shipping = needsLocation ? 'Pilih pin tujuan pengiriman terlebih dahulu.' : 'Tunggu estimasi ongkir yang valid sebelum memesan.';
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  const handleSystemSubmit = (e) => {
+  const submitOrder = async (e, orderMethod) => {
     e.preventDefault();
-    if (!validate()) return;
-    onSubmitOrder({
-      ...formData,
-      items: cart,
-      orderMethod: 'system'
-    });
-  };
-
-  const handleWhatsAppSubmit = async (e) => {
-    e.preventDefault();
-    if (!validate()) return;
-
-    // Buka jendela dari klik pengguna; kirim hanya setelah pesanan diterima server.
-    const popup = window.open('about:blank', '_blank');
+    if (isSubmitting || submittingRef.current || !validate()) return;
+    submittingRef.current = true;
+    setSubmitError('');
+    const popup = orderMethod === 'whatsapp' ? window.open('about:blank', '_blank') : null;
     if (popup) popup.opener = null;
-    const order = await onSubmitOrder({ ...formData, items: cart, orderMethod: 'whatsapp' });
-    if (!order) {
+    let order;
+    try {
+      order = await onSubmitOrder({ ...formData, items: cart, orderMethod, deliveryLocation, shippingQuoteToken: quote.quoteToken });
+    } catch (error) {
       popup?.close();
+      setSubmitError(error.message || 'Gagal memproses pesanan. Silakan coba lagi.');
+      setQuoteState({ key: '', data: null, error: '' });
+      setRetryQuote((value) => value + 1);
+      if (error.quote?.shippingConfig) setCheckoutInfo((previous) => ({ ...previous, ...error.quote.shippingConfig }));
+      else if (error.code?.startsWith('SHIPPING_')) {
+        try { setCheckoutInfo(await api.getStoreInfo()); } catch { /* Coba lagi dari estimasi ongkir. */ }
+      }
       return;
+    } finally {
+      submittingRef.current = false;
     }
+    if (!order) { popup?.close(); return; }
+    if (orderMethod !== 'whatsapp') return;
 
     const orderItemsText = order.items.map((item, idx) =>
       `${idx + 1}. *${item.name}${item.variantName ? ` - ${item.variantName}` : ''}* (${item.quantity}x ${item.unit}) = ${formatRupiah(item.price * item.quantity)}`
@@ -111,6 +162,7 @@ export default function CheckoutModal({
       `• Nama: ${order.customerName}\n` +
       `• No. HP/WA: ${order.customerPhone}\n` +
       `• Alamat: ${order.address}\n` +
+      (order.deliveryDetails?.mode === 'distance' ? `• Lokasi: ${deliveryMapUrl(order.deliveryDetails.destination)}\n• Jarak: ${formatDistance(order.deliveryDetails.distanceMeters)} (garis lurus)\n` : '') +
       `• Jadwal Kirim: ${order.deliverySlot}\n` +
       `• Pembayaran: ${order.paymentMethod}\n` +
       (order.notes ? `• Catatan: ${order.notes}\n` : '') +
@@ -127,7 +179,7 @@ export default function CheckoutModal({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="relative bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100 animate-scale-up">
+      <div className="relative bg-white rounded-3xl max-w-2xl min-w-0 w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100 animate-scale-up">
         {/* Header */}
         <div className="sticky top-0 bg-white/95 backdrop-blur-md px-6 py-4 border-b border-slate-100 flex items-center justify-between z-10">
           <div>
@@ -136,20 +188,22 @@ export default function CheckoutModal({
           </div>
           <button
             onClick={onClose}
+            disabled={isSubmitting}
             className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <form className="p-6 space-y-6">
+        <form className="p-6 space-y-6" onSubmit={(event) => event.preventDefault()}>
+          <fieldset disabled={isSubmitting} className="space-y-6 min-w-0">
           {/* Login-as indicator */}
           {currentUser && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-center gap-2 text-xs text-emerald-900">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>
+              <span className="min-w-0 break-words">
                 Anda checkout sebagai <b>{currentUser.name}</b>
-                <span className="text-emerald-700"> ({currentUser.email})</span>
+                <span className="text-emerald-700 break-all"> ({currentUser.email})</span>
               </span>
             </div>
           )}
@@ -246,13 +300,22 @@ export default function CheckoutModal({
             </div>
           </div>
 
+          {distanceEnabled && (
+            <div className="border-t border-slate-100 pt-4 space-y-3">
+              <LazyMap label="Lokasi pengiriman" value={deliveryLocation} onChange={setDeliveryLocation} origin={checkoutInfo.shippingSettings.storeLocation}
+                radiusKm={checkoutInfo.shippingSettings.tiers.at(-1)?.upToKm} freeRadiusKm={checkoutInfo.shippingSettings.freeDeliveryRadiusKm} disabled={isSubmitting} />
+              <p className="text-xs text-slate-600">Gratis ongkir: belanja minimal {formatRupiah(checkoutInfo.freeDeliveryMin ?? 150000)}, radius maksimal {checkoutInfo.shippingSettings.freeDeliveryRadiusKm} km.</p>
+              {needsLocation && <p className="text-xs text-amber-800">Pilih pin alamat tujuan untuk menghitung ongkir.</p>}
+            </div>
+          )}
+
           {/* Delivery Slot Selection */}
           <div className="space-y-3 pt-2 border-t border-slate-100">
             <h3 className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
               <Truck className="w-4 h-4" /> Pilih Jadwal Pengiriman Sayur
             </h3>
             <div className="grid grid-cols-1 gap-2.5">
-              {(storeInfo?.deliverySlots || [
+              {(checkoutInfo?.deliverySlots || [
                 { id: 'subuh', label: 'Pengiriman Pagi 1 (06.00 - 08.00 WIB)', desc: 'Paling disarankan untuk masak sarapan & sayur ter-segar' },
                 { id: 'pagi', label: 'Pengiriman Pagi 2 (08.30 - 11.00 WIB)', desc: 'Cocok untuk persiapan makan siang' },
                 { id: 'siang', label: 'Pengiriman Siang/Sore (13.00 - 16.00 WIB)', desc: 'Pengantaran kloter siang' }
@@ -276,7 +339,7 @@ export default function CheckoutModal({
                       className="mt-1 text-emerald-600 focus:ring-emerald-500"
                     />
                     <div>
-                      <div className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-2">
+                      <div className="text-xs sm:text-sm font-bold text-slate-800 flex flex-wrap items-center gap-2">
                         <span>{slot.label}</span>
                         {slot.id === 'subuh' && (
                           <span className="bg-amber-100 text-amber-900 text-[10px] font-bold px-2 py-0.5 rounded-full">
@@ -352,6 +415,13 @@ export default function CheckoutModal({
           </div>
 
           {/* Order Summary Box */}
+          {quoteError && <div role="alert" className="bg-amber-50 text-amber-900 border border-amber-200 rounded-xl p-3 text-xs">
+            <p>{quoteError}</p>
+            <button type="button" onClick={() => { setQuoteState({ key: '', data: null, error: '' }); setRetryQuote((value) => value + 1); }} className="font-bold underline mt-2">Coba Hitung Ongkir Lagi</button>
+          </div>}
+          {formErrors.shipping && <p role="alert" className="text-xs text-rose-600">{formErrors.shipping}</p>}
+          {submitError && <p role="alert" className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900">{submitError}</p>}
+          <DeliveryDetails details={quote?.deliveryDetails} />
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2 text-xs">
             <div className="font-bold text-slate-800">Ringkasan Biaya:</div>
             <div className="flex justify-between text-slate-600">
@@ -360,11 +430,11 @@ export default function CheckoutModal({
             </div>
             <div className="flex justify-between text-slate-600">
               <span>Biaya Pengiriman:</span>
-              <span>{deliveryFee === 0 ? <b className="text-emerald-600">GRATIS</b> : formatRupiah(deliveryFee)}</span>
+              <span>{!quote ? (needsLocation ? 'Pilih lokasi pengiriman' : quoteError ? 'Belum tersedia' : 'Menghitung…') : deliveryFee === 0 ? <b className="text-emerald-600">GRATIS</b> : formatRupiah(deliveryFee)}</span>
             </div>
             <div className="flex justify-between text-sm font-black text-slate-900 pt-1.5 border-t border-slate-200">
               <span>Total yang Harus Dibayar:</span>
-              <span className="text-emerald-700">{formatRupiah(grandTotal)}</span>
+              <span className="text-emerald-700">{quote ? formatRupiah(grandTotal) : 'Menunggu ongkir'}</span>
             </div>
           </div>
 
@@ -372,9 +442,9 @@ export default function CheckoutModal({
           <div className="space-y-2.5 pt-2">
             <button
               type="button"
-              onClick={handleWhatsAppSubmit}
-              disabled={isSubmitting || !selectedPayment}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white font-bold py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 text-sm transition-all"
+              onClick={(event) => submitOrder(event, 'whatsapp')}
+              disabled={isSubmitting || !selectedPayment || !quote}
+              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-98 text-white font-bold py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 text-sm transition-all"
             >
               <MessageSquare className="w-5 h-5 text-emerald-200" />
               <span>Pesan via WhatsApp (Rekomendasi Cepat)</span>
@@ -382,14 +452,15 @@ export default function CheckoutModal({
 
             <button
               type="button"
-              onClick={handleSystemSubmit}
-              disabled={isSubmitting || !selectedPayment}
-              className="w-full bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-800 font-bold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 text-xs transition-all border border-slate-200"
+              onClick={(event) => submitOrder(event, 'system')}
+              disabled={isSubmitting || !selectedPayment || !quote}
+              className="w-full bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-98 text-slate-800 font-bold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 text-xs transition-all border border-slate-200"
             >
               <Send className="w-4 h-4 text-emerald-700" />
               <span>Pesan Langsung di Sistem Web (Tanpa Buka WA)</span>
             </button>
           </div>
+          </fieldset>
         </form>
       </div>
     </div>

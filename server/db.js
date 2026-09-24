@@ -6,6 +6,7 @@ const path = require('path');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const { defaultPaymentMethods } = require('./payments');
+const { defaultShippingSettings } = require('./shipping');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -105,6 +106,7 @@ const INITIAL_STORE_INFO = {
   ],
   deliveryFee: 8000,
   freeDeliveryMin: 150000,
+  shippingSettings: defaultShippingSettings(),
   paymentMethods: defaultPaymentMethods(),
   heroBanner: {
     badge: 'Garansi Segar: Layu atau Rusak Kami Ganti 100%!',
@@ -275,6 +277,7 @@ function mapOrder(row) {
     items: typeof row.items === 'string' ? JSON.parse(row.items) : row.items,
     itemsTotal: Number(row.items_total),
     deliveryFee: Number(row.delivery_fee),
+    deliveryDetails: row.delivery_details || null,
     grandTotal: Number(row.grand_total),
     status: row.status,
     createdAt: row.created_at,

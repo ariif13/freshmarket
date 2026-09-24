@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import DeliveryDetails from '../DeliveryDetails';
 import {
   Package,
   Clock,
@@ -412,6 +413,7 @@ export default function MyOrdersPage({ onBackToStore, storeInfo }) {
                       </div>
                     </div>
 
+                    <DeliveryDetails details={order.deliveryDetails} />
                     {/* Items List */}
                     <PaymentInstructions payment={order.paymentDetails} />
                     <div className="bg-white border border-slate-200 rounded-xl p-3">

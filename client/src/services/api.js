@@ -57,6 +57,7 @@ async function request(url, options = {}) {
     err.retryAfter = data?.retryAfter;
     err.attemptsLeft = data?.attemptsLeft;
     err.unlockAt = data?.unlockAt;
+    err.quote = data?.quote;
     throw err;
   }
   return data;
@@ -183,6 +184,10 @@ export const api = {
   },
 
   // ============ ORDERS ============
+  async getShippingQuote(payload, signal) {
+    return request(`${BASE_URL}/shipping/quote`, { method: 'POST', body: JSON.stringify(payload), signal });
+  },
+
   async getOrders(status = '') {
     const query = status && status !== 'Semua' ? `?status=${encodeURIComponent(status)}` : '';
     return request(`${BASE_URL}/orders${query}`);

@@ -18,13 +18,14 @@ export default function CartDrawer({
   if (!isOpen) return null;
 
   const itemsTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const freeMin = storeInfo?.freeDeliveryMin || 150000;
-  const standardFee = storeInfo?.deliveryFee || 8000;
+  const freeMin = storeInfo?.freeDeliveryMin ?? 150000;
+  const standardFee = storeInfo?.deliveryFee ?? 8000;
+  const distanceEnabled = storeInfo?.shippingSettings?.enabled === true;
   const isFreeDelivery = itemsTotal >= freeMin;
   const deliveryFee = itemsTotal === 0 ? 0 : (isFreeDelivery ? 0 : standardFee);
   const grandTotal = itemsTotal + deliveryFee;
   const diffToFree = Math.max(0, freeMin - itemsTotal);
-  const progressPercent = Math.min(100, (itemsTotal / freeMin) * 100);
+  const progressPercent = freeMin > 0 ? Math.min(100, (itemsTotal / freeMin) * 100) : 100;
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
@@ -59,7 +60,9 @@ export default function CartDrawer({
             <div className="flex items-center justify-between text-xs mb-1.5 font-semibold">
               <span className="flex items-center gap-1.5 text-emerald-900">
                 <Truck className="w-4 h-4 text-emerald-600" />
-                {isFreeDelivery ? (
+                {distanceEnabled ? (
+                  <span>{isFreeDelivery ? 'Minimal belanja gratis ongkir tercapai.' : <>Belanja <b>{formatRupiah(diffToFree)}</b> lagi.</>} Gratis ongkir berlaku dalam radius <b>{storeInfo.shippingSettings.freeDeliveryRadiusKm} km</b>.</span>
+                ) : isFreeDelivery ? (
                   <span className="text-emerald-700 font-bold">🎉 Hore! Anda Mendapatkan GRATIS ONGKIR!</span>
                 ) : (
                   <span>Belanja <b>{formatRupiah(diffToFree)}</b> lagi untuk Gratis Ongkir!</span>
@@ -168,7 +171,7 @@ export default function CartDrawer({
                 <div className="flex justify-between items-center">
                   <span>Ongkos Kirim:</span>
                   <span className="font-semibold">
-                    {deliveryFee === 0 ? (
+                    {distanceEnabled ? 'Dihitung saat checkout' : deliveryFee === 0 ? (
                       <span className="text-emerald-600 font-bold bg-emerald-100 px-2 py-0.5 rounded">
                         GRATIS
                       </span>
@@ -178,8 +181,8 @@ export default function CartDrawer({
                   </span>
                 </div>
                 <div className="flex justify-between text-sm font-black text-slate-900 pt-2 border-t border-slate-200">
-                  <span>Total Pembayaran:</span>
-                  <span className="text-emerald-700 text-base">{formatRupiah(grandTotal)}</span>
+                  <span>{distanceEnabled ? 'Subtotal (sebelum ongkir):' : 'Total Pembayaran:'}</span>
+                  <span className="text-emerald-700 text-base">{formatRupiah(distanceEnabled ? itemsTotal : grandTotal)}</span>
                 </div>
               </div>
 

@@ -11,14 +11,18 @@ export default function Hero({ onSelectCategory, storeInfo }) {
 
   const defaultFeatures = [
     { id: '1', icon: '⏰', title: 'Kirim Pagi 06.00', desc: 'Tiba tepat waktu sebelum mulai masak sarapan' },
-    { id: '2', icon: '🛵', title: 'Gratis Ongkir', desc: `Otomatis gratis ongkir belanja min. ${formatRupiah(storeInfo?.freeDeliveryMin || 150000)}` },
+    { id: '2', icon: '🛵', title: 'Gratis Ongkir', desc: `Otomatis gratis ongkir belanja min. ${formatRupiah(storeInfo?.freeDeliveryMin ?? 150000)}` },
     { id: '3', icon: '💵', title: 'Bisa Bayar COD', desc: 'Cek sayuran dulu baru bayar tunai di tempat' },
     { id: '4', icon: '📲', title: 'Order via WhatsApp', desc: 'Bisa pesan langsung terhubung ke chat admin' }
   ];
 
-  const features = (heroBanner?.features && heroBanner.features.length > 0) 
+  const configuredFeatures = (heroBanner?.features && heroBanner.features.length > 0)
     ? heroBanner.features 
     : defaultFeatures;
+  const shipping = storeInfo?.shippingSettings;
+  const features = configuredFeatures.map((feature) => shipping?.enabled && /gratis\s*ongkir/i.test(feature.title)
+    ? { ...feature, desc: `Belanja min. ${formatRupiah(storeInfo?.freeDeliveryMin ?? 150000)} dalam radius ${shipping.freeDeliveryRadiusKm} km dari toko.` }
+    : feature);
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-900 via-emerald-800 to-teal-900 text-white shadow-xl shadow-emerald-950/10 mb-8 mt-4 border border-emerald-700/40">
@@ -45,6 +49,8 @@ export default function Hero({ onSelectCategory, storeInfo }) {
           <p className="text-emerald-100/90 text-sm sm:text-base leading-relaxed">
             {subtitle}
           </p>
+
+          {shipping?.enabled && <p className="text-xs text-emerald-100 mt-3">Area pengiriman hingga {shipping.tiers.at(-1)?.upToKm} km dari toko (garis lurus). Ongkir dihitung dari pin tujuan saat checkout.</p>}
 
           <div className="pt-2 flex flex-wrap items-center gap-3">
             <button

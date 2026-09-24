@@ -168,7 +168,7 @@ export default function App() {
       setIsCartOpen(false);
       setIsCheckoutOpen(true);
     } catch (err) {
-      alert('Gagal memuat pengaturan pembayaran: ' + err.message);
+      alert('Gagal memuat pengaturan checkout: ' + err.message);
     }
   };
 
@@ -191,9 +191,6 @@ export default function App() {
       setIsCartOpen(false);
       handleClearCart();
       return createdOrder;
-    } catch (err) {
-      alert('Gagal memproses pesanan: ' + err.message);
-      return null;
     } finally {
       setIsSubmittingOrder(false);
     }
