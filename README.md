@@ -46,7 +46,7 @@ KPI dashboard: total penjualan (tanpa pesanan batal), pesanan aktif, pesanan sel
 ## Menjalankan Lokal
 
 ### Persyaratan
-- Node.js 18+ (Dockerfile memakai Node 20)
+- Node.js 22+ (Vite 8 dan google-auth-library membutuhkannya)
 - PostgreSQL 14+ (lokal atau cloud)
 - npm
 
