@@ -72,6 +72,24 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const loginWithGoogle = useCallback(async (credential) => {
+    const data = await api.googleLogin(credential);
+    tokenStorage.set(data.token);
+    setUser(data.user);
+    return data.user;
+  }, []);
+
+  const linkGoogle = useCallback(async (credential) => {
+    const data = await api.googleLink(credential);
+    try {
+      const me = await api.getMe();
+      setUser(me.user);
+    } catch {
+      logout();
+    }
+    return data;
+  }, []);
+
   const value = {
     user,
     loading,
@@ -80,6 +98,8 @@ export function AuthProvider({ children }) {
     isCustomer: user?.role === 'customer',
     login,
     register,
+    loginWithGoogle,
+    linkGoogle,
     logout,
     refreshMe
   };

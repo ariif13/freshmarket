@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
+const { defaultPaymentMethods } = require('./payments');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -104,6 +105,7 @@ const INITIAL_STORE_INFO = {
   ],
   deliveryFee: 8000,
   freeDeliveryMin: 150000,
+  paymentMethods: defaultPaymentMethods(),
   heroBanner: {
     badge: 'Garansi Segar: Layu atau Rusak Kami Ganti 100%!',
     title: 'Belanja Segar Setiap Pagi,',
@@ -122,10 +124,16 @@ const INITIAL_STORE_INFO = {
 // Migration & seed
 // ------------------------------------------------------------
 async function runMigrations() {
-  const schemaFile = path.join(__dirname, 'migrations', '001_schema.sql');
-  const schemaSql = fs.readFileSync(schemaFile, 'utf-8');
-  await pool.query(schemaSql);
-  console.log('[DB] Schema migrated successfully.');
+  const migrationsDir = path.join(__dirname, 'migrations');
+  const migrationFiles = fs.readdirSync(migrationsDir)
+    .filter((file) => file.endsWith('.sql'))
+    .sort();
+
+  for (const file of migrationFiles) {
+    const migrationSql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    await pool.query(migrationSql);
+  }
+  console.log(`[DB] ${migrationFiles.length} migration(s) applied successfully.`);
 }
 
 async function seedIfEmpty() {
@@ -197,6 +205,8 @@ function mapUser(row) {
     name: row.name,
     email: row.email,
     passwordHash: row.password_hash,
+    hasPassword: Boolean(row.password_hash),
+    googleLinked: Boolean(row.google_sub),
     phone: row.phone || '',
     address: row.address || '',
     role: row.role,
@@ -224,6 +234,20 @@ function mapProduct(row) {
   };
 }
 
+function mapVariant(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    productId: row.product_id,
+    name: row.name,
+    price: Number(row.price),
+    unit: row.unit,
+    stock: row.stock,
+    available: row.available,
+    sortOrder: row.sort_order
+  };
+}
+
 function mapCategory(row) {
   if (!row) return null;
   return {
@@ -245,6 +269,8 @@ function mapOrder(row) {
     address: row.address,
     deliverySlot: row.delivery_slot,
     paymentMethod: row.payment_method,
+    paymentMethodId: row.payment_details?.id || null,
+    paymentDetails: row.payment_details || null,
     notes: row.notes || '',
     items: typeof row.items === 'string' ? JSON.parse(row.items) : row.items,
     itemsTotal: Number(row.items_total),
@@ -279,6 +305,7 @@ module.exports = {
   init,
   mapUser,
   mapProduct,
+  mapVariant,
   mapCategory,
   mapOrder,
   mapReview

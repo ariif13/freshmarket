@@ -13,6 +13,7 @@ import {
   Printer
 } from 'lucide-react';
 import { api, formatRupiah } from '../../services/api';
+import PaymentInstructions from '../PaymentInstructions';
 
 const STATUS_COLORS = {
   'Menunggu Konfirmasi': 'bg-amber-100 text-amber-800 border-amber-300',
@@ -162,12 +163,18 @@ export default function OrderManagement() {
               </div>
 
               {/* Order Items preview */}
+              {order.paymentDetails && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-semibold text-emerald-800 py-1">Detail pembayaran pesanan</summary>
+                  <PaymentInstructions payment={order.paymentDetails} />
+                </details>
+              )}
               <div className="bg-slate-50/90 rounded-xl p-3 text-xs space-y-1.5 border border-slate-100">
                 <span className="font-bold text-slate-700 block text-[11px]">Daftar Belanja:</span>
                 <div className="space-y-1 max-h-32 overflow-y-auto">
                   {order.items.map((item, idx) => (
                     <div key={idx} className="flex justify-between text-slate-600">
-                      <span>• <b>{item.quantity}x</b> {item.name} ({item.unit})</span>
+                      <span>• <b>{item.quantity}x</b> {item.name}{item.variantName ? ` - ${item.variantName}` : ''} ({item.unit})</span>
                       <span className="font-medium text-slate-800">{formatRupiah(item.price * item.quantity)}</span>
                     </div>
                   ))}

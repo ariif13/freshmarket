@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Minus, ShoppingCart, Check, Info } from 'lucide-react';
+import { Plus, Minus, Info } from 'lucide-react';
 import { formatRupiah } from '../services/api';
 import StarRating from './reviews/StarRating';
 
@@ -10,8 +10,13 @@ export default function ProductCard({
   cartItem,
   onOpenDetail 
 }) {
-  const isOutOfStock = !product.available || product.stock <= 0;
-  const isLowStock = product.stock > 0 && product.stock <= 5;
+  const hasVariants = product.hasVariants || product.variants?.length > 0;
+  const displayPrice = hasVariants ? product.priceFrom : product.price;
+  const displayStock = hasVariants ? product.stockTotal : product.stock;
+  const isOutOfStock = hasVariants
+    ? !product.purchasable
+    : !product.available || product.stock <= 0;
+  const isLowStock = displayStock > 0 && displayStock <= 5;
   const currentQty = cartItem ? cartItem.quantity : 0;
 
   return (
@@ -55,7 +60,7 @@ export default function ProductCard({
           </div>
         ) : isLowStock ? (
           <span className="absolute bottom-2 right-2 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-xs">
-            Sisa {product.stock} {product.unit.split(' ')[0]}
+            Sisa {displayStock} {hasVariants ? 'item' : product.unit.split(' ')[0]}
           </span>
         ) : null}
 
@@ -91,16 +96,20 @@ export default function ProductCard({
             </div>
           )}
           <p className="text-xs text-slate-400 mt-0.5">
-            Satuan: <span className="text-slate-600 font-medium">{product.unit}</span>
+            {hasVariants ? (
+              <span className="text-emerald-700 font-medium">{product.variants?.length || 0} pilihan ukuran / paket</span>
+            ) : (
+              <>Satuan: <span className="text-slate-600 font-medium">{product.unit}</span></>
+            )}
           </p>
         </div>
 
         {/* Price & Action Section */}
         <div className="mt-4 pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
           <div>
-            <div className="text-[10px] text-slate-400 uppercase font-semibold">Harga</div>
+            <div className="text-[10px] text-slate-400 uppercase font-semibold">{hasVariants ? 'Mulai dari' : 'Harga'}</div>
             <div className="text-sm sm:text-base font-extrabold text-emerald-800">
-              {formatRupiah(product.price)}
+              {formatRupiah(displayPrice)}
             </div>
           </div>
 
@@ -112,6 +121,13 @@ export default function ProductCard({
                 className="bg-slate-100 text-slate-400 text-xs font-semibold px-3 py-2 rounded-xl cursor-not-allowed"
               >
                 Habis
+              </button>
+            ) : hasVariants ? (
+              <button
+                onClick={() => onOpenDetail(product)}
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-xs shadow-emerald-600/20 transition-all"
+              >
+                <span>Pilih Varian</span>
               </button>
             ) : currentQty > 0 ? (
               <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-300 rounded-xl p-0.5 shadow-2xs">

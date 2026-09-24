@@ -1,22 +1,57 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { randomBytes } = require('crypto');
-const { query, mapUser } = require('../db');
-const { signToken, verifyToken } = require('../middleware/auth');
+const { query, tx, mapUser } = require('../db');
+const { signToken, verifyToken, JWT_SECRET } = require('../middleware/auth');
+const { issueGoogleNonce, consumeGoogleNonce, verifyGoogleCredential, resolveGoogleCustomer, googleError } = require('../googleAuth');
 const {
   loginLimiter,
   registerLimiter,
+  generalAuthLimiter,
   accountLockoutCheck,
   recordLoginAttempt
 } = require('../middleware/rateLimit');
 
 const router = express.Router();
+const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || '').trim();
 
 function sanitizeUser(user) {
   if (!user) return null;
   const { passwordHash, ...safe } = user;
   return safe;
 }
+
+// Google Identity Services (popup): ID token + nonce terikat browser.
+router.get('/google/config', generalAuthLimiter, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!GOOGLE_CLIENT_ID) return res.json({ enabled: false });
+  res.json({ enabled: true, clientId: GOOGLE_CLIENT_ID, nonce: issueGoogleNonce(res, JWT_SECRET) });
+});
+
+function googleHandler(linkAccount = false) {
+  return async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      if (!GOOGLE_CLIENT_ID) throw googleError(503, 'GOOGLE_NOT_CONFIGURED', 'Login Google belum diaktifkan.');
+      const nonce = consumeGoogleNonce(req, res, JWT_SECRET);
+      const identity = await verifyGoogleCredential(req.body?.credential, nonce, GOOGLE_CLIENT_ID);
+      const row = await tx((client) => resolveGoogleCustomer(client, identity, linkAccount ? req.user.id : null));
+      const user = mapUser(row);
+      if (linkAccount) {
+        return res.json({ message: 'Akun Google berhasil dihubungkan.', user: sanitizeUser(user) });
+      }
+      const token = signToken({ id: user.id, email: user.email, role: user.role, name: user.name });
+      res.json({ message: 'Login Google berhasil.', token, user: sanitizeUser(user) });
+    } catch (error) {
+      if (error.status) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Google authentication error:', error.code || error.name);
+      res.status(500).json({ message: 'Login Google belum berhasil. Silakan coba lagi.' });
+    }
+  };
+}
+
+router.post('/google', loginLimiter, googleHandler());
+router.post('/google/link', verifyToken, loginLimiter, googleHandler(true));
 
 // -------------------------------------------------------------
 // POST /api/auth/register
@@ -78,7 +113,7 @@ router.post('/register', registerLimiter, async (req, res) => {
 router.post('/login', loginLimiter, accountLockoutCheck, async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
+    if (typeof email !== 'string' || !email.trim() || typeof password !== 'string' || !password) {
       return res.status(400).json({ message: 'Email dan password wajib diisi.' });
     }
 
@@ -98,7 +133,7 @@ router.post('/login', loginLimiter, accountLockoutCheck, async (req, res) => {
       });
     }
 
-    const isValid = await bcrypt.compare(password, user.passwordHash);
+    const isValid = user.hasPassword && await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
       const info = recordLoginAttempt(emailClean, false);
       const msg = info.locked
@@ -175,6 +210,9 @@ router.put('/me', verifyToken, async (req, res) => {
 
     // Ganti password
     if (newPassword) {
+      if (!user.hasPassword) {
+        return res.status(400).json({ message: 'Akun ini masuk melalui Google dan belum memiliki password lokal.' });
+      }
       if (!currentPassword) return res.status(400).json({ message: 'Masukkan password lama untuk mengubah password.' });
       const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
       if (!isValid) return res.status(401).json({ message: 'Password lama salah.' });

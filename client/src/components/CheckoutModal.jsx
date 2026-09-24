@@ -5,17 +5,16 @@ import {
   MessageSquare, 
   Truck, 
   CreditCard, 
-  MapPin, 
   User, 
-  Phone, 
-  FileText, 
-  Check, 
   QrCode,
   Banknote,
   Building2,
   ShieldCheck
 } from 'lucide-react';
 import { formatRupiah } from '../services/api';
+import PaymentInstructions from './PaymentInstructions';
+
+const PAYMENT_ICONS = { cod: Banknote, qris: QrCode, transfer: Building2 };
 
 export default function CheckoutModal({
   isOpen,
@@ -26,12 +25,13 @@ export default function CheckoutModal({
   isSubmitting,
   currentUser
 }) {
+  const paymentMethods = (storeInfo?.paymentMethods || []).filter((method) => method.enabled);
   const [formData, setFormData] = useState({
     customerName: currentUser?.name || '',
     customerPhone: currentUser?.phone || '',
     address: currentUser?.address || '',
     deliverySlot: storeInfo?.deliverySlots?.[0]?.label || 'Pengiriman Pagi 1 (06.00 - 08.00 WIB)',
-    paymentMethod: 'COD (Bayar di Tempat)',
+    paymentMethodId: paymentMethods[0]?.id || '',
     notes: ''
   });
   const [formErrors, setFormErrors] = useState({});
@@ -45,7 +45,7 @@ export default function CheckoutModal({
       customerPhone: currentUser?.phone || '',
       address: currentUser?.address || '',
       deliverySlot: storeInfo?.deliverySlots?.[0]?.label || 'Pengiriman Pagi 1 (06.00 - 08.00 WIB)',
-      paymentMethod: 'COD (Bayar di Tempat)',
+      paymentMethodId: storeInfo?.paymentMethods?.find((method) => method.enabled)?.id || '',
       notes: ''
     });
     setFormErrors({});
@@ -61,6 +61,7 @@ export default function CheckoutModal({
   const freeMin = storeInfo?.freeDeliveryMin || 150000;
   const deliveryFee = itemsTotal >= freeMin ? 0 : (storeInfo?.deliveryFee || 8000);
   const grandTotal = itemsTotal + deliveryFee;
+  const selectedPayment = paymentMethods.find((method) => method.id === formData.paymentMethodId);
 
   const validate = () => {
     const errors = {};
@@ -71,6 +72,7 @@ export default function CheckoutModal({
       errors.customerPhone = 'Format nomor HP tidak valid';
     }
     if (!formData.address.trim()) errors.address = 'Alamat pengiriman wajib diisi';
+    if (!selectedPayment) errors.paymentMethod = 'Pilih metode pembayaran yang tersedia.';
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -85,41 +87,42 @@ export default function CheckoutModal({
     });
   };
 
-  const handleWhatsAppSubmit = (e) => {
+  const handleWhatsAppSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
 
-    // Build formatted WhatsApp message
-    const orderItemsText = cart.map((item, idx) => 
-      `${idx + 1}. *${item.name}* (${item.quantity}x ${item.unit}) = ${formatRupiah(item.price * item.quantity)}`
+    // Buka jendela dari klik pengguna; kirim hanya setelah pesanan diterima server.
+    const popup = window.open('about:blank', '_blank');
+    if (popup) popup.opener = null;
+    const order = await onSubmitOrder({ ...formData, items: cart, orderMethod: 'whatsapp' });
+    if (!order) {
+      popup?.close();
+      return;
+    }
+
+    const orderItemsText = order.items.map((item, idx) =>
+      `${idx + 1}. *${item.name}${item.variantName ? ` - ${item.variantName}` : ''}* (${item.quantity}x ${item.unit}) = ${formatRupiah(item.price * item.quantity)}`
     ).join('\n');
 
     const rawPhone = (storeInfo?.whatsapp || '6281234567890').replace(/[^0-9]/g, '');
     const message = `Halo *${storeInfo?.name || 'FreshMarket'}*, saya ingin memesan belanjaan segar:\n\n` +
+      `• Nomor Pesanan: ${order.id}\n` +
       `👤 *Data Pemesan:*\n` +
-      `• Nama: ${formData.customerName}\n` +
-      `• No. HP/WA: ${formData.customerPhone}\n` +
-      `• Alamat: ${formData.address}\n` +
-      `• Jadwal Kirim: ${formData.deliverySlot}\n` +
-      `• Pembayaran: ${formData.paymentMethod}\n` +
-      (formData.notes ? `• Catatan: ${formData.notes}\n` : '') +
+      `• Nama: ${order.customerName}\n` +
+      `• No. HP/WA: ${order.customerPhone}\n` +
+      `• Alamat: ${order.address}\n` +
+      `• Jadwal Kirim: ${order.deliverySlot}\n` +
+      `• Pembayaran: ${order.paymentMethod}\n` +
+      (order.notes ? `• Catatan: ${order.notes}\n` : '') +
       `\n🛒 *Daftar Belanjaan:*\n${orderItemsText}\n\n` +
-      `• Subtotal: ${formatRupiah(itemsTotal)}\n` +
-      `• Ongkir: ${deliveryFee === 0 ? 'GRATIS' : formatRupiah(deliveryFee)}\n` +
-      `💰 *Total Pembayaran: ${formatRupiah(grandTotal)}*\n\n` +
+      `• Subtotal: ${formatRupiah(order.itemsTotal)}\n` +
+      `• Ongkir: ${order.deliveryFee === 0 ? 'GRATIS' : formatRupiah(order.deliveryFee)}\n` +
+      `💰 *Total Pembayaran: ${formatRupiah(order.grandTotal)}*\n\n` +
       `Mohon segera diproses ya, terima kasih! 🙏`;
 
     const waUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(message)}`;
 
-    // Submit order to database as well
-    onSubmitOrder({
-      ...formData,
-      items: cart,
-      orderMethod: 'whatsapp'
-    });
-
-    // Open WhatsApp in new window
-    window.open(waUrl, '_blank');
+    if (popup) popup.location.href = waUrl;
   };
 
   return (
@@ -295,32 +298,12 @@ export default function CheckoutModal({
               <CreditCard className="w-4 h-4" /> Metode Pembayaran
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {[
-                { 
-                  id: 'COD', 
-                  label: 'COD (Bayar di Tempat)', 
-                  desc: 'Bayar tunai ke kurir saat sayur tiba',
-                  icon: Banknote 
-                },
-                { 
-                  id: 'QRIS', 
-                  label: 'QRIS / E-Wallet', 
-                  desc: 'Gopay, OVO, Dana, ShopeePay',
-                  icon: QrCode 
-                },
-                { 
-                  id: 'Transfer', 
-                  label: 'Transfer Bank', 
-                  desc: 'BCA, Mandiri, BRI',
-                  icon: Building2 
-                }
-              ].map((pay) => {
-                const isSelected = formData.paymentMethod === pay.label;
-                const IconComponent = pay.icon;
+              {paymentMethods.map((pay) => {
+                const isSelected = formData.paymentMethodId === pay.id;
+                const IconComponent = PAYMENT_ICONS[pay.id] || CreditCard;
                 return (
                   <label
                     key={pay.id}
-                    onClick={() => setFormData({ ...formData, paymentMethod: pay.label })}
                     className={`flex flex-col p-3 rounded-2xl border cursor-pointer transition-all ${
                       isSelected
                         ? 'bg-emerald-50/70 border-emerald-500 shadow-xs'
@@ -330,40 +313,28 @@ export default function CheckoutModal({
                     <div className="flex items-center justify-between mb-1">
                       <IconComponent className={`w-4 h-4 ${isSelected ? 'text-emerald-700' : 'text-slate-500'}`} />
                       <input
-                        type="radio"
-                        name="paymentMethod"
-                        checked={isSelected}
-                        onChange={() => {}}
+                         type="radio"
+                         name="paymentMethod"
+                         value={pay.id}
+                         checked={isSelected}
+                         onChange={() => setFormData({ ...formData, paymentMethodId: pay.id })}
                         className="text-emerald-600 focus:ring-emerald-500"
                       />
                     </div>
                     <span className="text-xs font-bold text-slate-800">{pay.label}</span>
-                    <span className="text-[10px] text-slate-500 mt-0.5">{pay.desc}</span>
+                    <span className="text-[10px] text-slate-500 mt-0.5">{pay.description}</span>
                   </label>
                 );
               })}
             </div>
 
-            {/* QRIS / Bank Transfer Simulation Notice */}
-            {formData.paymentMethod.includes('QRIS') && (
-              <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-2xl flex items-center gap-3 text-xs text-emerald-900">
-                <div className="w-12 h-12 bg-white rounded-lg p-1 border border-emerald-300 flex items-center justify-center shrink-0">
-                  <QrCode className="w-9 h-9 text-slate-800" />
-                </div>
-                <div>
-                  <span className="font-bold block">QRIS FreshMarket Otomatis:</span>
-                  <span>Kode QRIS toko akan ditampilkan setelah pesanan dibuat untuk discan dari e-wallet / m-banking Anda.</span>
-                </div>
-              </div>
+            {paymentMethods.length === 0 && (
+              <p role="alert" className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900">
+                Belum ada metode pembayaran yang aktif. Hubungi admin toko untuk melanjutkan pemesanan.
+              </p>
             )}
-
-            {formData.paymentMethod.includes('Transfer') && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-900 space-y-1">
-                <span className="font-bold block">Nomor Rekening FreshMarket:</span>
-                <div>• BCA: <b>8720-123-456</b> (a.n. FreshMarket)</div>
-                <div>• Mandiri: <b>137-00-987654-1</b> (a.n. FreshMarket)</div>
-              </div>
-            )}
+            {formErrors.paymentMethod && <p role="alert" className="text-xs text-rose-600">{formErrors.paymentMethod}</p>}
+            <PaymentInstructions payment={selectedPayment} showQrCode={false} />
           </div>
 
           {/* Notes */}
@@ -402,7 +373,7 @@ export default function CheckoutModal({
             <button
               type="button"
               onClick={handleWhatsAppSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !selectedPayment}
               className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white font-bold py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 text-sm transition-all"
             >
               <MessageSquare className="w-5 h-5 text-emerald-200" />
@@ -412,7 +383,7 @@ export default function CheckoutModal({
             <button
               type="button"
               onClick={handleSystemSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !selectedPayment}
               className="w-full bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-800 font-bold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 text-xs transition-all border border-slate-200"
             >
               <Send className="w-4 h-4 text-emerald-700" />

@@ -9,12 +9,13 @@ const express = require('express');
 const cors = require('cors');
 const {
   query, tx, init,
-  mapProduct, mapCategory, mapOrder
+  mapProduct, mapVariant, mapCategory, mapOrder
 } = require('./db');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const { router: reviewRoutes, computeProductRating } = require('./routes/reviews');
 const { verifyToken, requireAdmin } = require('./middleware/auth');
+const { getPaymentMethods, normalizePaymentMethods, selectPaymentMethod } = require('./payments');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -198,6 +199,198 @@ app.delete('/api/categories/:id', verifyToken, requireAdmin, async (req, res) =>
 // -------------------------------------------------------------
 // PRODUCTS
 // -------------------------------------------------------------
+function httpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function normalizeVariants(rawVariants) {
+  if (rawVariants === undefined) return undefined;
+  if (!Array.isArray(rawVariants)) {
+    throw httpError(400, 'Varian produk harus berupa daftar.');
+  }
+  if (rawVariants.length > 20) {
+    throw httpError(400, 'Maksimal 20 varian untuk satu produk.');
+  }
+
+  const names = new Set();
+  const ids = new Set();
+  return rawVariants.map((variant, index) => {
+    const name = typeof variant?.name === 'string' ? variant.name.trim() : '';
+    const unit = typeof variant?.unit === 'string' ? variant.unit.trim() : '';
+    const price = Number(variant?.price);
+    const stock = Number(variant?.stock);
+    const incomingId = typeof variant?.id === 'string' ? variant.id.trim() : '';
+
+    if (!name || name.length > 100) {
+      throw httpError(400, 'Nama setiap varian wajib diisi dan maksimal 100 karakter.');
+    }
+    if (!unit || unit.length > 64) {
+      throw httpError(400, 'Satuan setiap varian wajib diisi dan maksimal 64 karakter.');
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      throw httpError(400, 'Harga setiap varian harus berupa angka nol atau lebih.');
+    }
+    if (!Number.isSafeInteger(stock) || stock < 0) {
+      throw httpError(400, 'Stok setiap varian harus berupa bilangan bulat nol atau lebih.');
+    }
+
+    const nameKey = name.toLowerCase();
+    if (names.has(nameKey)) {
+      throw httpError(400, 'Nama varian tidak boleh duplikat dalam satu produk.');
+    }
+    if (incomingId && ids.has(incomingId)) {
+      throw httpError(400, 'ID varian tidak boleh duplikat dalam satu produk.');
+    }
+    names.add(nameKey);
+    if (incomingId) ids.add(incomingId);
+
+    return {
+      incomingId,
+      name,
+      price,
+      unit,
+      stock,
+      available: variant?.available === false || variant?.available === 'false' ? false : true,
+      sortOrder: index
+    };
+  });
+}
+
+function getVariantSummary(variants) {
+  const sellableVariants = variants.filter((variant) => variant.available && variant.stock > 0);
+  const priceVariants = sellableVariants.length > 0 ? sellableVariants : variants;
+  return {
+    price: Math.min(...priceVariants.map((variant) => Number(variant.price))),
+    unit: priceVariants[0]?.unit || 'pcs',
+    stock: variants.reduce((total, variant) => total + Number(variant.stock), 0)
+  };
+}
+
+function enrichProduct(product, variants) {
+  const hasVariants = variants.length > 0;
+  const sellableVariants = variants.filter((variant) => variant.available && variant.stock > 0);
+  const summary = hasVariants ? getVariantSummary(variants) : null;
+
+  return {
+    ...product,
+    variants,
+    hasVariants,
+    priceFrom: summary ? summary.price : product.price,
+    stockTotal: summary ? summary.stock : product.stock,
+    variantAvailableCount: sellableVariants.length,
+    purchasable: product.available && (hasVariants ? sellableVariants.length > 0 : product.stock > 0)
+  };
+}
+
+async function enrichProducts(rows) {
+  if (rows.length === 0) return [];
+
+  const productIds = rows.map((row) => row.id);
+  const variantsResult = await query(
+    `SELECT * FROM product_variants
+     WHERE product_id = ANY($1::varchar[])
+     ORDER BY product_id, sort_order, created_at`,
+    [productIds]
+  );
+  const variantsByProduct = new Map(productIds.map((id) => [id, []]));
+  for (const row of variantsResult.rows) {
+    variantsByProduct.get(row.product_id)?.push(mapVariant(row));
+  }
+
+  return rows.map((row) => enrichProduct(mapProduct(row), variantsByProduct.get(row.id) || []));
+}
+
+async function lockProducts(client, productIds) {
+  // Semua transaksi stok mengunci produk berurutan sebelum mengunci variannya.
+  const result = await client.query(
+    `SELECT * FROM products
+     WHERE id = ANY($1::varchar[])
+     ORDER BY id
+     FOR UPDATE`,
+    [[...new Set(productIds)]]
+  );
+  return new Map(result.rows.map((row) => [row.id, row]));
+}
+
+async function syncProductVariantSummary(client, productId) {
+  const summary = await client.query(
+    `SELECT
+       COALESCE(SUM(stock), 0)::int AS stock,
+       COALESCE(MIN(price) FILTER (WHERE available AND stock > 0), MIN(price), 0) AS price,
+       (ARRAY_AGG(unit ORDER BY sort_order, created_at))[1] AS unit
+     FROM product_variants
+     WHERE product_id = $1`,
+    [productId]
+  );
+  const row = summary.rows[0];
+  await client.query(
+    `UPDATE products SET price = $1, unit = $2, stock = $3 WHERE id = $4`,
+    [Number(row.price), row.unit || 'pcs', row.stock, productId]
+  );
+}
+
+async function saveVariants(client, productId, variants) {
+  const existingResult = await client.query(
+    'SELECT * FROM product_variants WHERE product_id = $1 FOR UPDATE',
+    [productId]
+  );
+  const existingById = new Map(existingResult.rows.map((row) => [row.id, row]));
+  const retainedIds = new Set();
+
+  for (const variant of variants) {
+    if (variant.incomingId && existingById.has(variant.incomingId)) {
+      retainedIds.add(variant.incomingId);
+    }
+  }
+
+  for (const existing of existingResult.rows) {
+    if (retainedIds.has(existing.id)) continue;
+    const usage = await client.query(
+      `SELECT 1 FROM orders WHERE items @> $1::jsonb LIMIT 1`,
+      [JSON.stringify([{ variantId: existing.id }])]
+    );
+    if (usage.rowCount > 0) {
+      throw httpError(409, `Varian "${existing.name}" sudah dipakai pada pesanan dan tidak dapat dihapus. Nonaktifkan varian tersebut sebagai gantinya.`);
+    }
+  }
+
+  const removedIds = existingResult.rows
+    .filter((existing) => !retainedIds.has(existing.id))
+    .map((existing) => existing.id);
+  if (removedIds.length > 0) {
+    await client.query(
+      'DELETE FROM product_variants WHERE product_id = $1 AND id = ANY($2::varchar[])',
+      [productId, removedIds]
+    );
+  }
+
+  for (const variant of variants) {
+    if (variant.incomingId && existingById.has(variant.incomingId)) {
+      await client.query(
+        `UPDATE product_variants
+         SET name = $1, price = $2, unit = $3, stock = $4, available = $5, sort_order = $6, updated_at = NOW()
+         WHERE id = $7 AND product_id = $8`,
+        [variant.name, variant.price, variant.unit, variant.stock, variant.available, variant.sortOrder, variant.incomingId, productId]
+      );
+    } else {
+      const id = `variant-${Date.now()}-${randomBytes(4).toString('hex')}`;
+      await client.query(
+        `INSERT INTO product_variants (id, product_id, name, price, unit, stock, available, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [id, productId, variant.name, variant.price, variant.unit, variant.stock, variant.available, variant.sortOrder]
+      );
+    }
+  }
+
+  const saved = await client.query(
+    'SELECT * FROM product_variants WHERE product_id = $1 ORDER BY sort_order, created_at',
+    [productId]
+  );
+  return saved.rows.map(mapVariant);
+}
+
 app.get('/api/products', async (req, res) => {
   try {
     const { category, search, availableOnly } = req.query;
@@ -215,21 +408,16 @@ app.get('/api/products', async (req, res) => {
       params.push(q);
       idx++;
     }
-    if (availableOnly === 'true') {
-      conditions.push(`available = true AND stock > 0`);
-    }
-
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const r = await query(`SELECT * FROM products ${where} ORDER BY created_at DESC`, params);
 
-    // Enrich dengan rating agregat via subquery
-    const products = await Promise.all(r.rows.map(async (row) => {
-      const p = mapProduct(row);
+    const productsWithVariants = await enrichProducts(r.rows);
+    const products = await Promise.all(productsWithVariants.map(async (p) => {
       const rating = await computeProductRating(p.id);
       return { ...p, avgRating: rating.average, totalReviews: rating.total };
     }));
 
-    res.json(products);
+    res.json(availableOnly === 'true' ? products.filter((product) => product.purchasable) : products);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message });
@@ -239,7 +427,7 @@ app.get('/api/products', async (req, res) => {
 app.get('/api/products/:id', async (req, res) => {
   const r = await query('SELECT * FROM products WHERE id = $1', [req.params.id]);
   if (r.rowCount === 0) return res.status(404).json({ message: 'Produk tidak ditemukan' });
-  const p = mapProduct(r.rows[0]);
+  const [p] = await enrichProducts(r.rows);
   const rating = await computeProductRating(p.id);
   res.json({
     ...p,
@@ -252,17 +440,33 @@ app.get('/api/products/:id', async (req, res) => {
 app.post('/api/products', verifyToken, requireAdmin, async (req, res) => {
   try {
     const { name, category, price, unit, stock, description, image, badge, organic, available } = req.body;
-    if (typeof name !== 'string' || !name.trim() || price === undefined) {
+    const variants = normalizeVariants(req.body.variants);
+    const hasVariants = variants && variants.length > 0;
+
+    if (typeof name !== 'string' || !name.trim() || (!hasVariants && price === undefined)) {
       return res.status(400).json({ message: 'Nama dan harga wajib diisi' });
     }
-    const priceValue = Number(price);
-    const stockValue = stock === undefined ? 0 : Number(stock);
-    if (!Number.isFinite(priceValue) || priceValue < 0) {
-      return res.status(400).json({ message: 'Harga harus berupa angka nol atau lebih.' });
+
+    let priceValue;
+    let stockValue;
+    let unitValue;
+    if (hasVariants) {
+      const summary = getVariantSummary(variants);
+      priceValue = summary.price;
+      stockValue = summary.stock;
+      unitValue = summary.unit;
+    } else {
+      priceValue = Number(price);
+      stockValue = stock === undefined ? 0 : Number(stock);
+      unitValue = unit || 'ikat';
+      if (!Number.isFinite(priceValue) || priceValue < 0) {
+        return res.status(400).json({ message: 'Harga harus berupa angka nol atau lebih.' });
+      }
+      if (!Number.isSafeInteger(stockValue) || stockValue < 0) {
+        return res.status(400).json({ message: 'Stok harus berupa bilangan bulat nol atau lebih.' });
+      }
     }
-    if (!Number.isSafeInteger(stockValue) || stockValue < 0) {
-      return res.status(400).json({ message: 'Stok harus berupa bilangan bulat nol atau lebih.' });
-    }
+
     const categoryId = category || 'sayur-mayur';
     const categoryResult = await query('SELECT 1 FROM categories WHERE id = $1', [categoryId]);
     if (categoryResult.rowCount === 0) {
@@ -270,25 +474,32 @@ app.post('/api/products', verifyToken, requireAdmin, async (req, res) => {
     }
 
     const id = `prod-${Date.now()}-${randomBytes(4).toString('hex')}`;
-    const result = await query(
-      `INSERT INTO products (id, name, category, price, unit, stock, description, image, badge, organic, available)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [
-        id,
-        name.trim(),
-        categoryId,
-        priceValue,
-        unit || 'ikat',
-        stockValue,
-        description || '',
-        image || 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=600&q=80',
-        badge || '',
-        Boolean(organic),
-        available !== undefined ? Boolean(available) : true
-      ]
-    );
-    res.status(201).json(mapProduct(result.rows[0]));
+    await tx(async (client) => {
+      await client.query(
+        `INSERT INTO products (id, name, category, price, unit, stock, description, image, badge, organic, available)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          id,
+          name.trim(),
+          categoryId,
+          priceValue,
+          unitValue,
+          stockValue,
+          description || '',
+          image || 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=600&q=80',
+          badge || '',
+          Boolean(organic),
+          available === false || available === 'false' ? false : true
+        ]
+      );
+      if (hasVariants) await saveVariants(client, id, variants);
+    });
+
+    const saved = await query('SELECT * FROM products WHERE id = $1', [id]);
+    const [product] = await enrichProducts(saved.rows);
+    res.status(201).json(product);
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
     console.error(err);
     res.status(500).json({ message: err.message });
   }
@@ -296,10 +507,8 @@ app.post('/api/products', verifyToken, requireAdmin, async (req, res) => {
 
 app.put('/api/products/:id', verifyToken, requireAdmin, async (req, res) => {
   try {
-    const existing = await query('SELECT * FROM products WHERE id = $1', [req.params.id]);
-    if (existing.rowCount === 0) return res.status(404).json({ message: 'Produk tidak ditemukan' });
-    const cur = mapProduct(existing.rows[0]);
     const b = req.body;
+    const variants = normalizeVariants(b.variants);
 
     if (b.name !== undefined && (typeof b.name !== 'string' || !b.name.trim())) {
       return res.status(400).json({ message: 'Nama produk tidak boleh kosong.' });
@@ -317,27 +526,63 @@ app.put('/api/products/:id', verifyToken, requireAdmin, async (req, res) => {
       }
     }
 
-    const result = await query(
-      `UPDATE products SET
-         name = $1, category = $2, price = $3, unit = $4, stock = $5,
-         description = $6, image = $7, badge = $8, organic = $9, available = $10
-       WHERE id = $11 RETURNING *`,
-      [
-        b.name !== undefined ? b.name : cur.name,
-        b.category !== undefined ? b.category : cur.category,
-        b.price !== undefined ? Number(b.price) : cur.price,
-        b.unit !== undefined ? b.unit : cur.unit,
-        b.stock !== undefined ? Number(b.stock) : cur.stock,
-        b.description !== undefined ? b.description : cur.description,
-        b.image !== undefined ? b.image : cur.image,
-        b.badge !== undefined ? b.badge : cur.badge,
-        b.organic !== undefined ? Boolean(b.organic) : cur.organic,
-        b.available !== undefined ? Boolean(b.available) : cur.available,
-        req.params.id
-      ]
-    );
-    res.json(mapProduct(result.rows[0]));
+    const updated = await tx(async (client) => {
+      const lockedProducts = await lockProducts(client, [req.params.id]);
+      const cur = mapProduct(lockedProducts.get(req.params.id));
+      if (!cur) throw httpError(404, 'Produk tidak ditemukan');
+
+      const currentVariants = await client.query(
+        'SELECT id FROM product_variants WHERE product_id = $1 FOR UPDATE',
+        [req.params.id]
+      );
+      const hasExistingVariants = currentVariants.rowCount > 0;
+      if (
+        hasExistingVariants && variants === undefined &&
+        (b.price !== undefined || b.unit !== undefined || b.stock !== undefined)
+      ) {
+        throw httpError(400, 'Harga, satuan, dan stok produk bervarian harus diatur melalui daftar variannya.');
+      }
+
+      let priceValue = b.price !== undefined ? Number(b.price) : cur.price;
+      let unitValue = b.unit !== undefined ? b.unit : cur.unit;
+      let stockValue = b.stock !== undefined ? Number(b.stock) : cur.stock;
+
+      if (variants !== undefined) {
+        const savedVariants = await saveVariants(client, req.params.id, variants);
+        if (savedVariants.length > 0) {
+          const summary = getVariantSummary(savedVariants);
+          priceValue = summary.price;
+          unitValue = summary.unit;
+          stockValue = summary.stock;
+        }
+      }
+
+      const result = await client.query(
+        `UPDATE products SET
+           name = $1, category = $2, price = $3, unit = $4, stock = $5,
+           description = $6, image = $7, badge = $8, organic = $9, available = $10
+         WHERE id = $11 RETURNING *`,
+        [
+          b.name !== undefined ? b.name.trim() : cur.name,
+          b.category !== undefined ? b.category : cur.category,
+          priceValue,
+          unitValue,
+          stockValue,
+          b.description !== undefined ? b.description : cur.description,
+          b.image !== undefined ? b.image : cur.image,
+          b.badge !== undefined ? b.badge : cur.badge,
+          b.organic !== undefined ? Boolean(b.organic) : cur.organic,
+          b.available === false || b.available === 'false' ? false : (b.available !== undefined ? true : cur.available),
+          req.params.id
+        ]
+      );
+      return result.rows[0];
+    });
+
+    const [product] = await enrichProducts([updated]);
+    res.json(product);
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
     console.error(err);
     res.status(500).json({ message: err.message });
   }
@@ -373,7 +618,7 @@ app.get('/api/orders', verifyToken, async (req, res) => {
 
 app.post('/api/orders', verifyToken, async (req, res) => {
   try {
-    const { customerName, customerPhone, address, deliverySlot, paymentMethod, notes, items } = req.body;
+    const { customerName, customerPhone, address, deliverySlot, paymentMethodId, paymentMethod, notes, items } = req.body;
     if (
       typeof customerName !== 'string' || !customerName.trim() ||
       typeof customerPhone !== 'string' || !customerPhone.trim() ||
@@ -387,56 +632,117 @@ app.post('/api/orders', verifyToken, async (req, res) => {
     const seenIds = new Set();
     for (const item of items) {
       const productId = typeof item?.id === 'string' ? item.id.trim() : '';
+      const variantId = typeof item?.variantId === 'string' ? item.variantId.trim() : '';
       const quantity = Number(item?.quantity);
       if (!productId || productId.length > 64) {
         return res.status(400).json({ message: 'Item keranjang memiliki ID produk yang tidak valid.' });
       }
-      if (seenIds.has(productId)) {
-        return res.status(400).json({ message: 'Produk yang sama tidak boleh muncul lebih dari sekali di keranjang.' });
+      if (variantId.length > 64) {
+        return res.status(400).json({ message: 'ID varian produk tidak valid.' });
+      }
+      const itemKey = `${productId}:${variantId || 'produk'}`;
+      if (seenIds.has(itemKey)) {
+        return res.status(400).json({ message: 'Produk atau varian yang sama tidak boleh muncul lebih dari sekali di keranjang.' });
       }
       if (!Number.isSafeInteger(quantity) || quantity <= 0) {
         return res.status(400).json({ message: 'Jumlah setiap produk harus berupa bilangan bulat lebih dari nol.' });
       }
-      seenIds.add(productId);
-      requestedItems.push({ productId, quantity });
+      seenIds.add(itemKey);
+      requestedItems.push({ productId, variantId, quantity });
     }
 
     const result = await tx(async (client) => {
+      const si = await client.query('SELECT data FROM store_info WHERE id = 1 FOR SHARE');
+      const storeInfo = si.rows[0]?.data || {};
+      const selectedPayment = selectPaymentMethod(storeInfo, paymentMethodId, paymentMethod);
+      const lockedProducts = await lockProducts(client, requestedItems.map((item) => item.productId));
       let itemsTotal = 0;
       const processedItems = [];
+      const variantProductIds = new Set();
 
       for (const item of requestedItems) {
-        const pr = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [item.productId]);
-        const product = pr.rows[0];
+        const product = lockedProducts.get(item.productId);
         if (!product) {
           const error = new Error('Salah satu produk di keranjang sudah tidak tersedia. Muat ulang katalog.');
           error.status = 409;
           throw error;
         }
-        if (!product.available || product.stock < item.quantity) {
-          const error = new Error(`Stok ${product.name} tidak mencukupi. Stok tersedia: ${product.stock}.`);
+        if (!product.available) {
+          const error = new Error(`${product.name} sedang tidak tersedia.`);
           error.status = 409;
           throw error;
         }
 
-        const price = Number(product.price);
-        const unit = product.unit;
-        const name = product.name;
-        const qty = item.quantity;
+        let price;
+        let unit;
+        let variantName;
 
-        itemsTotal += price * qty;
-        processedItems.push({ id: item.productId, name, price, unit, quantity: qty });
+        if (item.variantId) {
+          const variantResult = await client.query(
+            'SELECT * FROM product_variants WHERE id = $1 AND product_id = $2 FOR UPDATE',
+            [item.variantId, product.id]
+          );
+          const variant = variantResult.rows[0];
+          if (!variant) {
+            const error = new Error(`Varian ${product.name} sudah tidak tersedia. Muat ulang katalog.`);
+            error.status = 409;
+            throw error;
+          }
+          if (!variant.available || variant.stock < item.quantity) {
+            const error = new Error(`Stok varian ${variant.name} untuk ${product.name} tidak mencukupi. Stok tersedia: ${variant.stock}.`);
+            error.status = 409;
+            throw error;
+          }
 
-        const newStock = product.stock - qty;
-        await client.query(
-          `UPDATE products SET stock = $1, available = $2 WHERE id = $3`,
-          [newStock, newStock > 0 && product.available, product.id]
-        );
+          price = Number(variant.price);
+          unit = variant.unit;
+          variantName = variant.name;
+          const newStock = variant.stock - item.quantity;
+          await client.query(
+            `UPDATE product_variants SET stock = $1, available = $2, updated_at = NOW() WHERE id = $3`,
+            [newStock, newStock > 0 && variant.available, variant.id]
+          );
+          variantProductIds.add(product.id);
+        } else {
+          const variantCount = await client.query(
+            'SELECT COUNT(*)::int AS count FROM product_variants WHERE product_id = $1',
+            [product.id]
+          );
+          if (variantCount.rows[0].count > 0) {
+            const error = new Error(`Pilih varian untuk ${product.name} sebelum checkout.`);
+            error.status = 409;
+            throw error;
+          }
+          if (product.stock < item.quantity) {
+            const error = new Error(`Stok ${product.name} tidak mencukupi. Stok tersedia: ${product.stock}.`);
+            error.status = 409;
+            throw error;
+          }
+
+          price = Number(product.price);
+          unit = product.unit;
+          const newStock = product.stock - item.quantity;
+          await client.query(
+            `UPDATE products SET stock = $1, available = $2 WHERE id = $3`,
+            [newStock, newStock > 0 && product.available, product.id]
+          );
+        }
+
+        itemsTotal += price * item.quantity;
+        processedItems.push({
+          id: product.id,
+          name: product.name,
+          price,
+          unit,
+          quantity: item.quantity,
+          ...(item.variantId ? { variantId: item.variantId, variantName } : {})
+        });
       }
 
-      // Ambil storeInfo untuk deliveryFee
-      const si = await client.query('SELECT data FROM store_info WHERE id = 1');
-      const storeInfo = si.rows[0]?.data || {};
+      for (const productId of variantProductIds) {
+        await syncProductVariantSummary(client, productId);
+      }
+
       const freeMin = storeInfo.freeDeliveryMin || 150000;
       const deliveryFee = itemsTotal >= freeMin ? 0 : (storeInfo.deliveryFee || 8000);
       const grandTotal = itemsTotal + deliveryFee;
@@ -447,17 +753,17 @@ app.post('/api/orders', verifyToken, async (req, res) => {
       const insertRes = await client.query(
         `INSERT INTO orders (
            id, user_id, user_email, customer_name, customer_phone, address,
-           delivery_slot, payment_method, notes, items, items_total, delivery_fee, grand_total, status
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, 'Menunggu Konfirmasi')
+           delivery_slot, payment_method, notes, items, items_total, delivery_fee, grand_total, payment_details, status
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14::jsonb, 'Menunggu Konfirmasi')
          RETURNING *`,
         [
           orderId, req.user.id, req.user.email,
           customerName.trim(), customerPhone.trim(), address.trim(),
           deliverySlot || 'Pengiriman Pagi 1 (06.00 - 08.00 WIB)',
-          paymentMethod || 'COD (Bayar di Tempat)',
+          selectedPayment.label,
           notes || '',
           JSON.stringify(processedItems),
-          itemsTotal, deliveryFee, grandTotal
+          itemsTotal, deliveryFee, grandTotal, JSON.stringify(selectedPayment)
         ]
       );
 
@@ -508,16 +814,38 @@ app.patch('/api/orders/:id/status', verifyToken, requireAdmin, async (req, res) 
       }
 
       if (status === 'Dibatalkan') {
-        for (const item of order.items || []) {
+        const restorableItems = (order.items || []).filter((item) => (
+          item.id && Number.isSafeInteger(Number(item.quantity)) && Number(item.quantity) > 0
+        ));
+        await lockProducts(client, restorableItems.map((item) => item.id));
+        const variantProductIds = new Set();
+        for (const item of restorableItems) {
           const quantity = Number(item.quantity);
-          if (!item.id || !Number.isSafeInteger(quantity) || quantity <= 0) continue;
-          await client.query(
-            `UPDATE products
-             SET stock = stock + $1,
-                 available = CASE WHEN stock = 0 THEN true ELSE available END
-             WHERE id = $2`,
-            [quantity, item.id]
-          );
+          if (item.variantId) {
+            const restored = await client.query(
+              `UPDATE product_variants
+               SET stock = stock + $1,
+                   available = CASE WHEN stock = 0 THEN true ELSE available END,
+                   updated_at = NOW()
+               WHERE id = $2 AND product_id = $3`,
+              [quantity, item.variantId, item.id]
+            );
+            if (restored.rowCount === 0) {
+              throw httpError(409, `Varian pada pesanan ${order.id} tidak lagi tersedia untuk dipulihkan.`);
+            }
+            variantProductIds.add(item.id);
+          } else {
+            await client.query(
+              `UPDATE products
+               SET stock = stock + $1,
+                   available = CASE WHEN stock = 0 THEN true ELSE available END
+               WHERE id = $2`,
+              [quantity, item.id]
+            );
+          }
+        }
+        for (const productId of variantProductIds) {
+          await syncProductVariantSummary(client, productId);
         }
       }
 
@@ -541,19 +869,36 @@ app.patch('/api/orders/:id/status', verifyToken, requireAdmin, async (req, res) 
 // -------------------------------------------------------------
 app.get('/api/store-info', async (req, res) => {
   const r = await query('SELECT data FROM store_info WHERE id = 1');
-  res.json(r.rows[0]?.data || {});
+  const info = r.rows[0]?.data || {};
+  res.json({ ...info, paymentMethods: getPaymentMethods(info) });
 });
 
 app.put('/api/store-info', verifyToken, requireAdmin, async (req, res) => {
-  const cur = await query('SELECT data FROM store_info WHERE id = 1');
-  const curData = cur.rows[0]?.data || {};
-  const merged = { ...curData, ...req.body };
-  await query(
-    `INSERT INTO store_info (id, data, updated_at) VALUES (1, $1, NOW())
-     ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
-    [JSON.stringify(merged)]
-  );
-  res.json(merged);
+  try {
+    const paymentMethods = req.body.paymentMethods === undefined
+      ? undefined
+      : normalizePaymentMethods(req.body.paymentMethods);
+    const updated = await tx(async (client) => {
+      const cur = await client.query('SELECT data FROM store_info WHERE id = 1 FOR UPDATE');
+      const curData = cur.rows[0]?.data || {};
+      const merged = {
+        ...curData,
+        ...req.body,
+        paymentMethods: paymentMethods || getPaymentMethods(curData)
+      };
+      await client.query(
+        `INSERT INTO store_info (id, data, updated_at) VALUES (1, $1, NOW())
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+        [JSON.stringify(merged)]
+      );
+      return merged;
+    });
+    res.json(updated);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
+    console.error('Store settings update error:', err);
+    res.status(500).json({ message: 'Gagal menyimpan pengaturan toko.' });
+  }
 });
 
 // -------------------------------------------------------------

@@ -1,6 +1,7 @@
 import React from 'react';
-import { CheckCircle2, MessageSquare, QrCode, Clock, MapPin, ArrowRight, Receipt } from 'lucide-react';
+import { CheckCircle2, MessageSquare, Receipt } from 'lucide-react';
 import { formatRupiah } from '../services/api';
+import PaymentInstructions from './PaymentInstructions';
 
 export default function OrderSuccessModal({ order, onClose, onViewMyOrders, storeInfo }) {
   if (!order) return null;
@@ -11,7 +12,7 @@ export default function OrderSuccessModal({ order, onClose, onViewMyOrders, stor
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="relative bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-100 text-center animate-scale-up">
+      <div className="relative bg-white rounded-3xl max-w-lg w-full max-h-[92vh] overflow-y-auto p-6 sm:p-8 shadow-2xl border border-slate-100 text-center animate-scale-up">
         {/* Success Icon */}
         <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
           <CheckCircle2 className="w-10 h-10" />
@@ -54,25 +55,9 @@ export default function OrderSuccessModal({ order, onClose, onViewMyOrders, stor
           </div>
         </div>
 
-        {/* QRIS Display if QRIS method was selected */}
-        {order.paymentMethod?.includes('QRIS') && (
-          <div className="mb-5 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-center space-y-2">
-            <span className="text-xs font-bold text-emerald-900 block">
-              Silakan Scan QRIS Berikut untuk Pembayaran:
-            </span>
-            <div className="inline-block p-3 bg-white rounded-xl shadow-xs border border-emerald-300">
-              <img
-                src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=00020101021126580016ID.CO.FRESHMARKET.WWW01189360099900000000005204541153033605802ID5916FRESHMARKET%20STORE6007JAKARTA62070703A016304A12B"
-                alt="QRIS Code"
-                className="w-36 h-36 mx-auto"
-              />
-              <span className="text-[10px] text-slate-500 font-mono mt-1 block">
-                NMID: ID102003920192 • FreshMarket
-              </span>
-            </div>
-            <p className="text-[11px] text-emerald-800">
-              Dapat discan melalui BCA, Mandiri, BRI, Gopay, OVO, ShopeePay, Dana.
-            </p>
+        {order.paymentDetails && (
+          <div className="mb-5">
+            <PaymentInstructions payment={order.paymentDetails} />
           </div>
         )}
 

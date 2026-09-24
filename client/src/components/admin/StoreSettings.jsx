@@ -2,24 +2,20 @@ import React, { useState } from 'react';
 import { 
   Store, 
   Save, 
-  Phone, 
-  Clock, 
-  MapPin, 
-  Truck, 
   Check, 
   Sparkles, 
   Layout, 
   Sliders, 
-  Layers,
-  HelpCircle,
+  CreditCard,
   Eye
 } from 'lucide-react';
-import { api, formatRupiah } from '../../services/api';
+import { api } from '../../services/api';
+import PaymentSettings from './PaymentSettings';
 
 const QUICK_EMOJIS = ['⏰', '🛵', '💵', '📲', '🥬', '🥦', '🚚', '⭐', '🛡️', '🧺', '🏷️', '🍳', '🥕', '🍗', '🌾', '💯'];
 
 export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
-  const [activeSection, setActiveSection] = useState('banner'); // 'banner' | 'general'
+  const [activeSection, setActiveSection] = useState('banner');
 
   const [formData, setFormData] = useState({
     name: storeInfo?.name || '',
@@ -29,6 +25,7 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
     openHours: storeInfo?.openHours || '',
     deliveryFee: storeInfo?.deliveryFee || 8000,
     freeDeliveryMin: storeInfo?.freeDeliveryMin || 150000,
+    paymentMethods: storeInfo?.paymentMethods || [],
     heroBanner: storeInfo?.heroBanner || {
       badge: 'Garansi Segar: Layu atau Rusak Kami Ganti 100%!',
       title: 'Sayur Segar Panen Subuh,',
@@ -65,6 +62,8 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
 
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
+  const [uploadingPaymentImage, setUploadingPaymentImage] = useState(false);
 
   // Helper to update a feature card
   const handleFeatureChange = (index, field, value) => {
@@ -89,6 +88,9 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving || uploadingPaymentImage) return;
+    setError('');
+    setSuccess(false);
     try {
       setSaving(true);
       const updated = await api.updateStoreInfo({
@@ -97,10 +99,11 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
         freeDeliveryMin: Number(formData.freeDeliveryMin)
       });
       onUpdateStoreInfo(updated);
+      setFormData((previous) => ({ ...previous, paymentMethods: updated.paymentMethods }));
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
-      alert('Gagal menyimpan pengaturan: ' + err.message);
+      setError('Gagal menyimpan pengaturan: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -115,10 +118,10 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
         <div>
           <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
             <Sliders className="w-5 h-5 text-emerald-700" />
-            <span>Pengaturan Toko & Tampilan Banner</span>
+            <span>Pengaturan Toko</span>
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Sesuaikan teks banner, ikon 4 kartu keunggulan, tarif ongkir, dan kontak WhatsApp
+            Sesuaikan tampilan banner, profil toko, tarif ongkir, dan metode pembayaran
           </p>
         </div>
 
@@ -130,7 +133,7 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
       </div>
 
       {/* Section Switcher Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-1">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-1">
         <button
           type="button"
           onClick={() => setActiveSection('banner')}
@@ -156,9 +159,31 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
           <Store className="w-4 h-4" />
           <span>🏪 Profil Toko & Tarif Ongkir</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveSection('payments')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+            activeSection === 'payments'
+              ? 'bg-emerald-700 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <CreditCard className="w-4 h-4" />
+          <span>Metode Pembayaran</span>
+        </button>
       </div>
 
+      {error && <p role="alert" className="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-xl text-xs">{error}</p>}
+
       <form onSubmit={handleSubmit} className="space-y-6">
+        {activeSection === 'payments' && (
+          <PaymentSettings
+            methods={formData.paymentMethods}
+            onChange={(update) => setFormData((previous) => ({ ...previous, paymentMethods: update(previous.paymentMethods) }))}
+            uploading={uploadingPaymentImage}
+            onUploadingChange={setUploadingPaymentImage}
+          />
+        )}
         {/* SECTION 1: HERO BANNER & 4 FEATURE CARDS */}
         {activeSection === 'banner' && (
           <div className="space-y-6">
@@ -470,7 +495,7 @@ export default function StoreSettings({ storeInfo, onUpdateStoreInfo }) {
         <div className="pt-2 flex justify-end">
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || uploadingPaymentImage}
             className="bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white text-xs font-bold px-6 py-3 rounded-2xl shadow-lg shadow-emerald-600/20 flex items-center gap-2 transition-all"
           >
             <Save className="w-4 h-4" />

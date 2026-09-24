@@ -45,7 +45,7 @@ async function request(url, options = {}) {
   if (!res.ok) {
     const message = (data && data.message) || `Request gagal (${res.status})`;
     // Auto-logout kalau token tidak valid / expired (tapi jangan pas login endpoint)
-    if (res.status === 401 && !url.includes('/auth/login')) {
+    if (res.status === 401 && !url.includes('/auth/login') && !url.includes('/auth/google')) {
       tokenStorage.clear();
       window.dispatchEvent(new CustomEvent('freshmarket:unauthorized'));
     }
@@ -75,6 +75,24 @@ export const api = {
     return request(`${BASE_URL}/auth/login`, {
       method: 'POST',
       body: JSON.stringify(payload)
+    });
+  },
+
+  async getGoogleConfig() {
+    return request(`${BASE_URL}/auth/google/config`);
+  },
+
+  async googleLogin(credential) {
+    return request(`${BASE_URL}/auth/google`, {
+      method: 'POST',
+      body: JSON.stringify({ credential })
+    });
+  },
+
+  async googleLink(credential) {
+    return request(`${BASE_URL}/auth/google/link`, {
+      method: 'POST',
+      body: JSON.stringify({ credential })
     });
   },
 

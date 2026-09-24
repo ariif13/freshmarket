@@ -14,14 +14,28 @@ import {
   UserCircle2,
   ShieldCheck,
   KeyRound,
-  Calendar
+  Calendar,
+  Link2
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
+import GoogleLoginButton from '../auth/GoogleLoginButton';
+
+function ChromeIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="4" />
+      <line x1="21.17" y1="8" x2="12" y2="8" />
+      <line x1="3.95" y1="6.06" x2="8.54" y2="14" />
+      <line x1="10.88" y1="21.94" x2="15.46" y2="14" />
+    </svg>
+  );
+}
 
 export default function ProfilePage({ onBackToStore }) {
   const { user, refreshMe } = useAuth();
-  const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'password'
+  const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'password' | 'google'
 
   // Form profil
   const [profileForm, setProfileForm] = useState({
@@ -186,6 +200,17 @@ export default function ProfilePage({ onBackToStore }) {
         >
           <KeyRound className="w-4 h-4" />
           Ganti Password
+        </button>
+        <button
+          onClick={() => setActiveTab('google')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold transition-all border-b-2 -mb-px ${
+            activeTab === 'google'
+              ? 'text-emerald-700 border-emerald-600'
+              : 'text-slate-500 border-transparent hover:text-slate-700'
+          }`}
+        >
+          <ChromeIcon className="w-4 h-4" />
+          Login Google
         </button>
       </div>
 
@@ -429,6 +454,60 @@ export default function ProfilePage({ onBackToStore }) {
             </button>
           </div>
         </form>
+      )}
+
+      {/* Tab: Google */}
+      {activeTab === 'google' && (
+        <div className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 space-y-5">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0">
+              <ChromeIcon className="w-5 h-5 text-slate-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-bold text-slate-900">Login dengan Google</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Tautkan akun Google agar bisa masuk lebih cepat tanpa password FreshMarket.
+              </p>
+            </div>
+          </div>
+
+          <div className={`rounded-xl border p-3.5 text-xs flex items-start gap-2 ${
+            user?.googleLinked
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-slate-50 border-slate-200 text-slate-600'
+          }`}>
+            {user?.googleLinked ? (
+              <>
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Akun Google <b>{user.email}</b> sudah tertaut. Anda bisa masuk lewat tombol Google.
+                </span>
+              </>
+            ) : (
+              <>
+                <Link2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Belum tertaut. Pilih akun Google dengan email yang sama: <b>{user?.email}</b>.
+                </span>
+              </>
+            )}
+          </div>
+
+          {!user?.googleLinked && (
+            <div className="border-t border-slate-100 pt-4">
+              <GoogleLoginButton
+                mode="link"
+                onSuccess={async () => {
+                  await refreshMe();
+                }}
+              />
+            </div>
+          )}
+
+          <p className="text-[11px] text-slate-400">
+            Login Google hanya untuk pelanggan. Akun admin tetap masuk dengan email & password.
+          </p>
+        </div>
       )}
     </div>
   );

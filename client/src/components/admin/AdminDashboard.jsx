@@ -244,12 +244,12 @@ export default function AdminDashboard({
         )}
         {activeTab === 'users' && <UserManagement />}
         {activeTab === 'reviews' && <ReviewManagement />}
-        {activeTab === 'settings' && (
+        {activeTab === 'settings' && (storeInfo ? (
           <StoreSettings 
             storeInfo={storeInfo} 
             onUpdateStoreInfo={onUpdateStoreInfo} 
           />
-        )}
+        ) : <p className="text-sm text-slate-500">Memuat pengaturan toko...</p>)}
       </div>
     </div>
   );

@@ -17,6 +17,10 @@ import { api } from './services/api';
 import { useAuth } from './contexts/AuthContext';
 import { Phone, MapPin, Clock } from 'lucide-react';
 
+function getCartItemId(item) {
+  return item.cartId || item.id;
+}
+
 export default function App() {
   const { user, isAdmin, loading: authLoading, logout } = useAuth();
 
@@ -101,34 +105,50 @@ export default function App() {
   }, [user]);
 
   // Cart Actions
-  const handleAddToCart = (product, quantity = 1) => {
+  const handleAddToCart = (product, quantity = 1, variant = null) => {
+    const cartId = variant ? `${product.id}:${variant.id}` : product.id;
+    const cartItem = {
+      id: product.id,
+      cartId,
+      name: product.name,
+      category: product.category,
+      price: variant ? variant.price : product.price,
+      unit: variant ? variant.unit : product.unit,
+      stock: variant ? variant.stock : product.stock,
+      image: product.image,
+      variantId: variant?.id,
+      variantName: variant?.name
+    };
+
     setCart((prev) => {
-      const existing = prev.find((item) => item.id === product.id);
+      const existing = prev.find((item) => getCartItemId(item) === cartId);
       if (existing) {
         return prev.map((item) =>
-          item.id === product.id
-            ? { ...item, quantity: Math.min(product.stock, item.quantity + quantity) }
+          getCartItemId(item) === cartId
+            ? { ...item, quantity: Math.min(item.stock, item.quantity + quantity) }
             : item
         );
       }
-      return [...prev, { ...product, quantity }];
+      return [...prev, { ...cartItem, quantity: Math.min(cartItem.stock, quantity) }];
     });
   };
 
-  const handleUpdateCartQty = (productId, quantity) => {
+  const handleUpdateCartQty = (cartId, quantity) => {
     if (quantity <= 0) {
-      handleRemoveCartItem(productId);
+      handleRemoveCartItem(cartId);
       return;
     }
     setCart((prev) =>
       prev.map((item) =>
-        item.id === productId ? { ...item, quantity } : item
+        getCartItemId(item) === cartId
+          ? { ...item, quantity: Math.min(item.stock, quantity) }
+          : item
       )
     );
   };
 
-  const handleRemoveCartItem = (productId) => {
-    setCart((prev) => prev.filter((item) => item.id !== productId));
+  const handleRemoveCartItem = (cartId) => {
+    setCart((prev) => prev.filter((item) => getCartItemId(item) !== cartId));
   };
 
   const handleClearCart = () => {
@@ -136,14 +156,20 @@ export default function App() {
   };
 
   // Wajib login untuk checkout
-  const handleOpenCheckout = () => {
+  const handleOpenCheckout = async () => {
     if (!user) {
       setIsCartOpen(false);
       setAuthView('login');
       return;
     }
-    setIsCartOpen(false);
-    setIsCheckoutOpen(true);
+    try {
+      const latestStoreInfo = await api.getStoreInfo();
+      setStoreInfo(latestStoreInfo);
+      setIsCartOpen(false);
+      setIsCheckoutOpen(true);
+    } catch (err) {
+      alert('Gagal memuat pengaturan pembayaran: ' + err.message);
+    }
   };
 
   // Submit Order Flow
@@ -153,15 +179,21 @@ export default function App() {
       const createdOrder = await api.createOrder(orderPayload);
 
       // Refresh products to show updated stock
-      const updatedProds = await api.getProducts();
-      setProducts(updatedProds);
+      try {
+        const updatedProds = await api.getProducts();
+        setProducts(updatedProds);
+      } catch (err) {
+        console.error('Gagal memperbarui katalog setelah checkout:', err);
+      }
 
       setSuccessOrder(createdOrder);
       setIsCheckoutOpen(false);
       setIsCartOpen(false);
       handleClearCart();
+      return createdOrder;
     } catch (err) {
       alert('Gagal memproses pesanan: ' + err.message);
+      return null;
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -172,7 +204,10 @@ export default function App() {
     if (selectedCategory !== 'semua' && product.category !== selectedCategory) {
       return false;
     }
-    if (onlyAvailable && (!product.available || product.stock <= 0)) {
+    const productIsPurchasable = product.hasVariants
+      ? product.purchasable
+      : product.available && product.stock > 0;
+    if (onlyAvailable && !productIsPurchasable) {
       return false;
     }
     if (onlyOrganic && !product.organic) {
@@ -189,6 +224,7 @@ export default function App() {
   });
 
   const cartTotalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const activePayments = (storeInfo?.paymentMethods || []).filter((method) => method.enabled);
 
   // ============ RENDER ============
 
@@ -344,7 +380,9 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3 sm:gap-5 mb-14">
                 {filteredProducts.map((product) => {
-                  const cartItem = cart.find((i) => i.id === product.id);
+                  const cartItem = product.hasVariants
+                    ? null
+                    : cart.find((item) => getCartItemId(item) === product.id);
                   return (
                     <ProductCard
                       key={product.id}
@@ -387,7 +425,7 @@ export default function App() {
         key={detailProduct?.id || 'closed'}
         product={detailProduct}
         onClose={() => setDetailProduct(null)}
-        cartItem={cart.find((i) => i.id === detailProduct?.id)}
+        cart={cart}
         onAddToCart={handleAddToCart}
         onUpdateCartQty={handleUpdateCartQty}
       />
@@ -434,7 +472,7 @@ export default function App() {
             <ul className="space-y-1 text-xs text-slate-400">
               <li>✓ Garansi sayur layu/busuk diganti 100%</li>
               <li>✓ Slot pengiriman subuh & pagi tepat waktu</li>
-              <li>✓ Bebas pilih bayar COD, QRIS, atau Transfer</li>
+              {activePayments.length > 0 && <li>✓ Pembayaran: {activePayments.map((method) => method.label).join(', ')}</li>}
               <li>✓ Kemasan higienis, bersih, dan siap olah</li>
             </ul>
           </div>

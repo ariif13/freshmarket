@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, Lock, Eye, EyeOff, LogIn, ArrowLeft, Sparkles } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import GoogleLoginButton from './GoogleLoginButton';
 
 export default function LoginPage({ onSwitchToRegister, onBackToStore }) {
   const { login } = useAuth();
@@ -161,6 +162,16 @@ export default function LoginPage({ onSwitchToRegister, onBackToStore }) {
               )}
             </button>
           </form>
+
+          {/* Google login */}
+          <div className="mt-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex-1 border-t border-slate-200" />
+              <span className="text-[11px] text-slate-400 font-medium">atau</span>
+              <div className="flex-1 border-t border-slate-200" />
+            </div>
+            <GoogleLoginButton mode="login" disabled={loading} />
+          </div>
 
           {/* Register link */}
           <p className="text-center text-xs text-slate-600 mt-5">

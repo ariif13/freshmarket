@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, Mail, Lock, Phone, UserPlus, Eye, EyeOff, ArrowLeft, Sparkles } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import GoogleLoginButton from './GoogleLoginButton';
 
 export default function RegisterPage({ onSwitchToLogin, onBackToStore }) {
   const { register } = useAuth();
@@ -200,6 +201,18 @@ export default function RegisterPage({ onSwitchToLogin, onBackToStore }) {
               )}
             </button>
           </form>
+
+          <div className="mt-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex-1 border-t border-slate-200" />
+              <span className="text-[11px] text-slate-400 font-medium">atau</span>
+              <div className="flex-1 border-t border-slate-200" />
+            </div>
+            <p className="text-center text-[11px] text-slate-500 mb-2.5">
+              Sudah punya atau ingin pakai Google?
+            </p>
+            <GoogleLoginButton mode="login" disabled={loading} />
+          </div>
 
           {/* Login link */}
           <p className="text-center text-xs text-slate-600 mt-5">

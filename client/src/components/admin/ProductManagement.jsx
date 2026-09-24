@@ -19,6 +19,14 @@ import {
 } from 'lucide-react';
 import { api, formatRupiah, COMMON_UNITS } from '../../services/api';
 
+const emptyVariant = () => ({
+  name: '',
+  price: '',
+  unit: 'pcs',
+  stock: '0',
+  available: true
+});
+
 export default function ProductManagement({ categories }) {
   const defaultCategory = categories.find((category) => category.id !== 'semua')?.id || 'sayur-mayur';
   const [products, setProducts] = useState([]);
@@ -54,6 +62,7 @@ export default function ProductManagement({ categories }) {
   });
 
   const [isCustomUnit, setIsCustomUnit] = useState(false);
+  const [variants, setVariants] = useState([]);
 
   const fetchProducts = async () => {
     try {
@@ -81,6 +90,7 @@ export default function ProductManagement({ categories }) {
     setIsCustomUnit(false);
     setUploadSuccess(false);
     setImageInputMode('file');
+    setVariants([]);
     setFormData({
       name: '',
       category: defaultCategory,
@@ -101,6 +111,14 @@ export default function ProductManagement({ categories }) {
     setEditingProduct(p);
     setUploadSuccess(false);
     setImageInputMode(p.image?.startsWith('/uploads') ? 'file' : 'url');
+    setVariants((p.variants || []).map((variant) => ({
+      id: variant.id,
+      name: variant.name,
+      price: variant.price,
+      unit: variant.unit,
+      stock: variant.stock,
+      available: variant.available !== false
+    })));
     
     // Check if unit is in COMMON_UNITS presets
     const isPreset = COMMON_UNITS.some(u => u.value === p.unit);
@@ -205,10 +223,28 @@ export default function ProductManagement({ categories }) {
     }
   };
 
+  const handleVariantChange = (index, field, value) => {
+    setVariants((prev) => prev.map((variant, variantIndex) => (
+      variantIndex === index ? { ...variant, [field]: value } : variant
+    )));
+  };
+
+  const handleRemoveVariant = (index) => {
+    setVariants((prev) => prev.filter((_, variantIndex) => variantIndex !== index));
+  };
+
   const handleSubmitForm = async (e) => {
     e.preventDefault();
-    if (!formData.name || !formData.price) {
+    if (!formData.name || (variants.length === 0 && !formData.price)) {
       alert('Nama produk dan harga wajib diisi');
+      return;
+    }
+
+    if (variants.some((variant) => (
+      !variant.name.trim() || !variant.unit.trim() ||
+      String(variant.price).trim() === '' || String(variant.stock).trim() === ''
+    ))) {
+      alert('Lengkapi nama, harga, satuan, dan stok setiap varian.');
       return;
     }
 
@@ -218,7 +254,15 @@ export default function ProductManagement({ categories }) {
 
     const payload = {
       ...formData,
-      unit: finalUnit
+      unit: finalUnit,
+      variants: variants.map((variant) => ({
+        ...(variant.id ? { id: variant.id } : {}),
+        name: variant.name.trim(),
+        price: Number(variant.price),
+        unit: variant.unit.trim(),
+        stock: Number(variant.stock),
+        available: variant.available
+      }))
     };
 
     try {
@@ -410,49 +454,69 @@ export default function ProductManagement({ categories }) {
 
                     {/* Quick Unit Selector */}
                     <td className="px-4 py-3">
-                      <select
-                        value={p.unit}
-                        onChange={(e) => handleQuickUnitChange(p, e.target.value)}
-                        className="text-xs bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none text-slate-700 font-medium max-w-[160px] truncate"
-                        title="Ubah satuan langsung"
-                      >
-                        {COMMON_UNITS.filter(u => u.value !== 'custom').map((unit) => (
-                          <option key={unit.value} value={unit.value}>
-                            {unit.value}
-                          </option>
-                        ))}
-                        {!COMMON_UNITS.some(u => u.value === p.unit) && (
-                          <option value={p.unit}>{p.unit}</option>
-                        )}
-                      </select>
+                      {p.hasVariants || p.variants?.length > 0 ? (
+                        <span className="inline-flex text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg">
+                          {p.variants?.length || 0} varian
+                        </span>
+                      ) : (
+                        <select
+                          value={p.unit}
+                          onChange={(e) => handleQuickUnitChange(p, e.target.value)}
+                          className="text-xs bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none text-slate-700 font-medium max-w-[160px] truncate"
+                          title="Ubah satuan langsung"
+                        >
+                          {COMMON_UNITS.filter(u => u.value !== 'custom').map((unit) => (
+                            <option key={unit.value} value={unit.value}>
+                              {unit.value}
+                            </option>
+                          ))}
+                          {!COMMON_UNITS.some(u => u.value === p.unit) && (
+                            <option value={p.unit}>{p.unit}</option>
+                          )}
+                        </select>
+                      )}
                     </td>
 
                     <td className="px-4 py-3">
-                      <input
-                        type="number"
-                        defaultValue={p.price}
-                        onBlur={(e) => handleQuickPriceUpdate(p, e.target.value)}
-                        className="w-24 text-xs font-bold text-emerald-800 bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-lg px-2 py-1 outline-none transition-all"
-                        title="Klik lalu ketik untuk ubah harga instan"
-                      />
+                      {p.hasVariants || p.variants?.length > 0 ? (
+                        <span className="text-xs font-bold text-emerald-800">
+                          Mulai {formatRupiah(p.priceFrom ?? p.price)}
+                        </span>
+                      ) : (
+                        <input
+                          type="number"
+                          defaultValue={p.price}
+                          onBlur={(e) => handleQuickPriceUpdate(p, e.target.value)}
+                          className="w-24 text-xs font-bold text-emerald-800 bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-emerald-500 rounded-lg px-2 py-1 outline-none transition-all"
+                          title="Klik lalu ketik untuk ubah harga instan"
+                        />
+                      )}
                     </td>
 
                     <td className="px-4 py-3">
-                      <input
-                        type="number"
-                        defaultValue={p.stock}
-                        onBlur={(e) => handleQuickStockUpdate(p, e.target.value)}
-                        className={`w-20 text-xs font-bold bg-slate-50 hover:bg-white focus:bg-white border rounded-lg px-2 py-1 outline-none transition-all ${
-                          p.stock <= 5 
-                            ? 'border-amber-300 text-amber-700 bg-amber-50/50' 
-                            : 'border-slate-200 text-slate-800'
-                        }`}
-                        title="Klik lalu ketik untuk update stok harian"
-                      />
+                      {p.hasVariants || p.variants?.length > 0 ? (
+                        <span className="text-xs font-bold text-slate-800">
+                          {p.stockTotal} total
+                        </span>
+                      ) : (
+                        <input
+                          type="number"
+                          defaultValue={p.stock}
+                          onBlur={(e) => handleQuickStockUpdate(p, e.target.value)}
+                          className={`w-20 text-xs font-bold bg-slate-50 hover:bg-white focus:bg-white border rounded-lg px-2 py-1 outline-none transition-all ${
+                            p.stock <= 5
+                              ? 'border-amber-300 text-amber-700 bg-amber-50/50'
+                              : 'border-slate-200 text-slate-800'
+                          }`}
+                          title="Klik lalu ketik untuk update stok harian"
+                        />
+                      )}
                     </td>
 
                     <td className="px-4 py-3">
-                      {p.stock > 0 && p.available ? (
+                      {((p.hasVariants || p.variants?.length > 0)
+                        ? p.available && p.variantAvailableCount > 0
+                        : p.stock > 0 && p.available) ? (
                         <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full text-[10px]">
                           Tersedia
                         </span>
@@ -613,7 +677,7 @@ export default function ProductManagement({ categories }) {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className={`grid gap-3 ${variants.length === 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Kategori</label>
                   <select
@@ -629,27 +693,27 @@ export default function ProductManagement({ categories }) {
                   </select>
                 </div>
 
-                {/* Comprehensive Units Selector */}
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Satuan Timbangan Sayur
-                  </label>
-                  <select
-                    value={isCustomUnit ? 'custom' : formData.unit}
-                    onChange={handleUnitSelectChange}
-                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:border-emerald-500 outline-none bg-white font-medium"
-                  >
-                    {COMMON_UNITS.map((unit) => (
-                      <option key={unit.value} value={unit.value}>
-                        {unit.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {variants.length === 0 && (
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Satuan Timbangan Sayur
+                    </label>
+                    <select
+                      value={isCustomUnit ? 'custom' : formData.unit}
+                      onChange={handleUnitSelectChange}
+                      className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:border-emerald-500 outline-none bg-white font-medium"
+                    >
+                      {COMMON_UNITS.map((unit) => (
+                        <option key={unit.value} value={unit.value}>
+                          {unit.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
-              {/* Custom Unit Input if selected */}
-              {isCustomUnit && (
+              {variants.length === 0 && isCustomUnit && (
                 <div className="bg-amber-50 p-3 rounded-xl border border-amber-200">
                   <label className="block font-bold text-amber-900 mb-1">
                     Tulis Satuan Manual:
@@ -665,30 +729,116 @@ export default function ProductManagement({ categories }) {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Harga Jual (Rp)</label>
-                  <input
-                    type="number"
-                    required
-                    placeholder="3500"
-                    value={formData.price}
-                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:border-emerald-500 outline-none font-bold text-emerald-800"
-                  />
+              {variants.length === 0 && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Harga Jual (Rp)</label>
+                    <input
+                      type="number"
+                      required
+                      placeholder="3500"
+                      value={formData.price}
+                      onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                      className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:border-emerald-500 outline-none font-bold text-emerald-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Stok Harian</label>
+                    <input
+                      type="number"
+                      required
+                      placeholder="30"
+                      value={formData.stock}
+                      onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                      className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:border-emerald-500 outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="font-bold text-emerald-950">Varian ukuran / berat / paket</h4>
+                    <p className="text-[10px] text-emerald-800 mt-0.5">
+                      Tambahkan bila satu produk memiliki harga, satuan, atau stok berbeda per pilihan.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setVariants((prev) => [...prev, emptyVariant()])}
+                    className="shrink-0 bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 text-[11px] font-bold px-3 py-1.5 rounded-lg"
+                  >
+                    + Tambah Varian
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Stok Harian</label>
-                  <input
-                    type="number"
-                    required
-                    placeholder="30"
-                    value={formData.stock}
-                    onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:border-emerald-500 outline-none"
-                  />
-                </div>
+                {variants.length === 0 ? (
+                  <p className="text-[11px] text-slate-600 bg-white/80 border border-emerald-100 rounded-xl p-2.5">
+                    Belum ada varian. Produk ini akan memakai harga, satuan, dan stok tunggal seperti produk lama.
+                  </p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {variants.map((variant, index) => (
+                      <div key={variant.id || index} className="bg-white border border-emerald-100 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-[11px] font-black text-slate-700">Varian {index + 1}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveVariant(index)}
+                            className="text-[10px] font-bold text-rose-700 hover:text-rose-800"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                          <input
+                            type="text"
+                            placeholder="Contoh: 500 gram"
+                            value={variant.name}
+                            onChange={(e) => handleVariantChange(index, 'name', e.target.value)}
+                            className="sm:col-span-2 text-xs px-3 py-2 rounded-lg border border-slate-200 focus:border-emerald-500 outline-none"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="Harga"
+                            value={variant.price}
+                            onChange={(e) => handleVariantChange(index, 'price', e.target.value)}
+                            className="text-xs px-3 py-2 rounded-lg border border-slate-200 focus:border-emerald-500 outline-none font-bold text-emerald-800"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="Stok"
+                            value={variant.stock}
+                            onChange={(e) => handleVariantChange(index, 'stock', e.target.value)}
+                            className="text-xs px-3 py-2 rounded-lg border border-slate-200 focus:border-emerald-500 outline-none"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <input
+                            type="text"
+                            placeholder="Satuan, contoh: pack"
+                            value={variant.unit}
+                            onChange={(e) => handleVariantChange(index, 'unit', e.target.value)}
+                            className="flex-1 text-xs px-3 py-2 rounded-lg border border-slate-200 focus:border-emerald-500 outline-none"
+                          />
+                          <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 whitespace-nowrap">
+                            <input
+                              type="checkbox"
+                              checked={variant.available}
+                              onChange={(e) => handleVariantChange(index, 'available', e.target.checked)}
+                              className="rounded text-emerald-600 focus:ring-emerald-500"
+                            />
+                            Tersedia
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">

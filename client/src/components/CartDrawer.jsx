@@ -1,6 +1,10 @@
 import React from 'react';
-import { X, Trash2, Plus, Minus, ArrowRight, ShoppingBag, Truck, Sparkles } from 'lucide-react';
+import { X, Trash2, Plus, Minus, ArrowRight, ShoppingBag, Truck } from 'lucide-react';
 import { formatRupiah } from '../services/api';
+
+function getCartItemId(item) {
+  return item.cartId || item.id;
+}
 
 export default function CartDrawer({
   isOpen,
@@ -90,9 +94,11 @@ export default function CartDrawer({
                 </button>
               </div>
             ) : (
-              cart.map((item) => (
+              cart.map((item) => {
+                const cartId = getCartItemId(item);
+                return (
                 <div 
-                  key={item.id}
+                  key={cartId}
                   className="flex items-center gap-3 p-3 bg-slate-50/80 hover:bg-slate-50 border border-slate-200/70 rounded-2xl transition-colors"
                 >
                   <img
@@ -107,6 +113,11 @@ export default function CartDrawer({
                     <div className="text-[11px] text-slate-500">
                       {item.unit} • {formatRupiah(item.price)}
                     </div>
+                    {item.variantName && (
+                      <div className="text-[10px] font-semibold text-emerald-700 mt-0.5">
+                        Varian: {item.variantName}
+                      </div>
+                    )}
                     <div className="text-xs font-bold text-emerald-800 mt-1">
                       Total: {formatRupiah(item.price * item.quantity)}
                     </div>
@@ -115,7 +126,7 @@ export default function CartDrawer({
                   {/* Quantity & Delete Controls */}
                   <div className="flex flex-col items-end gap-2">
                     <button
-                      onClick={() => onRemoveItem(item.id)}
+                      onClick={() => onRemoveItem(cartId)}
                       className="text-slate-400 hover:text-rose-600 transition-colors p-1"
                       title="Hapus item"
                     >
@@ -123,7 +134,7 @@ export default function CartDrawer({
                     </button>
                     <div className="flex items-center bg-white border border-slate-200 rounded-lg shadow-2xs">
                       <button
-                        onClick={() => onUpdateQty(item.id, item.quantity - 1)}
+                        onClick={() => onUpdateQty(cartId, item.quantity - 1)}
                         className="w-6 h-6 flex items-center justify-center text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-l"
                       >
                         <Minus className="w-3 h-3" />
@@ -132,7 +143,7 @@ export default function CartDrawer({
                         {item.quantity}
                       </span>
                       <button
-                        onClick={() => onUpdateQty(item.id, item.quantity + 1)}
+                        onClick={() => onUpdateQty(cartId, item.quantity + 1)}
                         disabled={Number.isFinite(item.stock) && item.quantity >= item.stock}
                         className="w-6 h-6 flex items-center justify-center text-slate-600 hover:bg-slate-100 font-bold text-xs rounded-r"
                       >
@@ -141,7 +152,8 @@ export default function CartDrawer({
                     </div>
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
 

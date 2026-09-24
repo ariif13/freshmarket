@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { api, formatRupiah } from '../../services/api';
 import StarRating from '../reviews/StarRating';
+import PaymentInstructions from '../PaymentInstructions';
 
 const STATUS_CONFIG = {
   'Menunggu Konfirmasi': {
@@ -412,6 +413,7 @@ export default function MyOrdersPage({ onBackToStore, storeInfo }) {
                     </div>
 
                     {/* Items List */}
+                    <PaymentInstructions payment={order.paymentDetails} />
                     <div className="bg-white border border-slate-200 rounded-xl p-3">
                       <div className="text-[10px] font-bold uppercase text-slate-500 tracking-wider mb-2">
                         Daftar Belanja ({order.items.length} item)
@@ -424,7 +426,9 @@ export default function MyOrdersPage({ onBackToStore, storeInfo }) {
                             <div key={idx} className="py-1.5 border-b border-slate-100 last:border-0">
                               <div className="flex justify-between text-xs items-center gap-2">
                                 <div className="flex-1 min-w-0">
-                                  <div className="font-semibold text-slate-800 truncate">{item.name}</div>
+                                  <div className="font-semibold text-slate-800 truncate">
+                                    {item.name}{item.variantName ? ` - ${item.variantName}` : ''}
+                                  </div>
                                   <div className="text-[10px] text-slate-500">
                                     {item.quantity} x {item.unit} @ {formatRupiah(item.price)}
                                   </div>

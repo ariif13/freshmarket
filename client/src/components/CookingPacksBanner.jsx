@@ -25,7 +25,11 @@ export default function CookingPacksBanner({ products, onAddToCart, onOpenDetail
 
       {/* Packs Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {packs.map(pack => (
+        {packs.map((pack) => {
+          const hasVariants = pack.hasVariants || pack.variants?.length > 0;
+          const price = hasVariants ? pack.priceFrom : pack.price;
+          const purchasable = hasVariants ? pack.purchasable : pack.available && pack.stock > 0;
+          return (
           <div 
             key={pack.id} 
             className="bg-white rounded-2xl p-4 border border-amber-200/60 shadow-xs hover:shadow-md transition-all flex flex-col justify-between"
@@ -53,20 +57,21 @@ export default function CookingPacksBanner({ products, onAddToCart, onOpenDetail
               <div>
                 <span className="text-[11px] text-slate-400 block">Harga Paket</span>
                 <span className="text-base font-black text-emerald-800">
-                  {formatRupiah(pack.price)}
+                  {formatRupiah(price)}
                 </span>
               </div>
               <button
-                onClick={() => onAddToCart(pack)}
-                disabled={!pack.available || pack.stock <= 0}
+                onClick={() => hasVariants ? onOpenDetail(pack) : onAddToCart(pack)}
+                disabled={!purchasable}
                 className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ShoppingBag className="w-3.5 h-3.5" />
-                <span>+ Keranjang</span>
+                <span>{hasVariants ? 'Pilih Varian' : '+ Keranjang'}</span>
               </button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
