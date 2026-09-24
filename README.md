@@ -14,6 +14,7 @@ Aplikasi web belanja kebutuhan segar (sayur, buah, bumbu, lauk hewani, sembako, 
 - Detail produk: pilih **varian** (mis. 250 g / 500 g / 1 kg), lihat ulasan pelanggan
 - Keranjang belanja tersimpan di browser, jumlah dibatasi stok, dengan progress gratis ongkir
 - Slot jadwal pengiriman (Pagi 1, Pagi 2, Siang/Sore — bisa diatur admin)
+- **Ongkir berdasarkan jarak**: pilih pin tujuan di peta (klik, geser pin, GPS, atau koordinat manual); ongkir dihitung dari jarak garis lurus ke toko
 - Metode pembayaran: **COD**, **QRIS** (gambar QR ditampilkan), **Transfer Bank** (hingga 5 rekening)
 - Checkout via sistem web, atau via WhatsApp (pesanan tetap tersimpan di sistem, lalu pesan WA terisi otomatis)
 - Halaman "Pesanan Saya": timeline status, filter status, tanya status ke admin via WA
@@ -29,7 +30,7 @@ Aplikasi web belanja kebutuhan segar (sayur, buah, bumbu, lauk hewani, sembako, 
 | **Kategori** | CRUD kategori + ikon; kategori yang masih dipakai produk tidak bisa dihapus |
 | **Pengguna** | Statistik, daftar & pencarian, riwayat belanja, ubah role, reset password, buka kunci akun, hapus user |
 | **Ulasan** | Statistik rating, produk rating tertinggi/terendah, filter, hapus ulasan |
-| **Pengaturan** | Info toko, WhatsApp, jam buka, ongkir & minimal gratis ongkir, isi banner Hero, metode pembayaran |
+| **Pengaturan** | Info toko, WhatsApp, jam buka, isi banner Hero, metode pembayaran, serta **Ongkir & Area Pengiriman** (pin toko di peta, rentang jarak & tarif, radius gratis ongkir) |
 
 KPI dashboard: total penjualan (tanpa pesanan batal), pesanan aktif, pesanan selesai, total produk, dan produk stok menipis (≤ 5).
 
@@ -115,6 +116,8 @@ Segera ganti password setelah login pertama!
 | `DEFAULT_ADMIN_EMAIL` | Tidak | `admin@freshmarket.com` | Hanya dipakai saat tabel users kosong |
 | `DEFAULT_ADMIN_PASSWORD` | Tidak | `admin123` | Hanya dipakai saat tabel users kosong |
 | `DB_LOG` | Tidak | `false` | `true` untuk mencatat setiap query ke console |
+| `VITE_MAP_TILE_URL` | Tidak | tile OpenStreetMap | Penyedia tile peta (dibaca saat **build** frontend, contoh di `client/.env.example`) |
+| `VITE_MAP_ATTRIBUTION` | Tidak | atribusi OSM | Teks atribusi penyedia tile |
 
 ### Mengaktifkan Login Google (opsional)
 1. Buat **OAuth Client ID** tipe *Web application* di Google Cloud Console (Google Auth Platform → Clients).
@@ -141,6 +144,8 @@ Ringkasan:
 6. Generate domain → live!
 
 Health check tersedia di `GET /api/health`.
+
+Setiap kali `git pull`, jalankan ulang `npm run install:all` dan `npm --prefix client run build`, lalu restart server agar migrasi baru ikut berjalan. Folder `client/dist` tidak di-commit.
 
 ---
 
@@ -173,6 +178,8 @@ freshmarket/
     ├── db.js                   # Koneksi PostgreSQL, migrasi & seeding
     ├── payments.js             # Validasi metode pembayaran (COD/QRIS/Transfer)
     ├── googleAuth.js           # Verifikasi & penautan akun Google
+    ├── shipping.js             # Ongkir berdasarkan jarak (Haversine) & estimasi bertanda tangan
+    ├── tests/                  # node --test (npm --prefix server test)
     ├── middleware/
     │   ├── auth.js             # JWT verify, requireAdmin
     │   └── rateLimit.js        # Rate limiting + lockout akun
@@ -184,7 +191,8 @@ freshmarket/
         ├── 001_schema.sql                 # Tabel inti
         ├── 002_product_variants.sql       # Varian produk
         ├── 003_order_payment_details.sql  # Snapshot detail pembayaran di pesanan
-        └── 004_google_sign_in.sql         # Kolom google_sub, password opsional
+        ├── 004_google_sign_in.sql         # Kolom google_sub, password opsional
+        └── 005_order_delivery_details.sql # Snapshot lokasi & ongkir di pesanan
 ```
 
 ---
@@ -210,6 +218,7 @@ Semua endpoint di prefix `/api`, kecuali `/uploads/:id`.
 - `GET /auth/me` — profil sendiri
 - `PUT /auth/me` — update profil / ganti password
 - `POST /auth/google/link` — tautkan akun Google (customer)
+- `POST /shipping/quote` — hitung ongkir & total dari item keranjang + titik tujuan
 - `POST /orders` — buat order
 - `GET /orders` — list order (customer: milik sendiri, admin: semua; query: `status`)
 - `GET /reviews/my` — ulasan sendiri
@@ -260,6 +269,13 @@ Menunggu Konfirmasi → Sedang Dikemas → Sedang Dikirim → Selesai
 - Harga produk ditampilkan "mulai dari" varian termurah yang tersedia; stok produk = total stok varian.
 - Varian yang sudah pernah dipesan tidak bisa dihapus — nonaktifkan saja.
 
+### Ongkir berdasarkan jarak
+Detail lengkap di [docs/ongkir.md](./docs/ongkir.md). Ringkasnya:
+- Nonaktif secara default; admin harus menentukan pin toko lalu mencentang "Aktifkan ongkir berdasarkan jarak". Selama nonaktif, berlaku ongkir standar (flat).
+- Rentang contoh 3 / 5 / 10 km berarti 0–3 km, >3–5 km, >5–10 km. Tujuan di luar rentang terakhir ditolak.
+- Gratis ongkir butuh dua syarat: minimal belanja terpenuhi **dan** tujuan dalam radius gratis ongkir.
+- Jarak adalah garis lurus (Haversine), bukan rute jalan. Titik toko, titik tujuan, jarak, dan tarif disimpan di pesanan.
+
 ### Ulasan
 - Hanya untuk produk dari pesanan berstatus **Selesai**.
 - Satu ulasan per produk per pelanggan, rating 1–5.
@@ -275,9 +291,10 @@ Menunggu Konfirmasi → Sedang Dikemas → Sedang Dikirim → Selesai
 
 - Data lockout akun disimpan di memori server: hilang saat restart dan tidak berbagi antar-instance. Gunakan Redis bila menjalankan lebih dari satu instance.
 - Gambar disimpan di PostgreSQL (`BYTEA`); untuk katalog besar pertimbangkan object storage (S3/R2).
-- Ongkir masih flat (satu tarif + batas gratis ongkir), belum berdasarkan jarak/zona.
+- Jarak ongkir dihitung garis lurus, bukan panjang rute jalan.
+- Tile peta memakai server publik OpenStreetMap (best-effort). Untuk trafik besar, gunakan penyedia tile sendiri lewat `VITE_MAP_TILE_URL`.
 - Pelanggan yang lupa password belum bisa reset sendiri; reset dilakukan oleh admin.
-- Belum ada automated test.
+- Automated test baru mencakup perhitungan ongkir (`npm --prefix server test`); frontend belum punya test.
 
 ---
 
