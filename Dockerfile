@@ -3,7 +3,7 @@
 # ============================================================
 
 # ---------- Stage 1: Build React frontend ----------
-FROM node:20-slim AS client-builder
+FROM node:22-slim AS client-builder
 
 WORKDIR /app/client
 
@@ -19,7 +19,7 @@ COPY client/ ./
 RUN npm run build
 
 # ---------- Stage 2: Install server dependencies ----------
-FROM node:20-slim AS server-deps
+FROM node:22-slim AS server-deps
 
 WORKDIR /app/server
 
@@ -29,7 +29,7 @@ COPY server/package.json server/package-lock.json* ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 # ---------- Stage 3: Runtime ----------
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 
 WORKDIR /app
 

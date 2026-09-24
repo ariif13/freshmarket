@@ -20,6 +20,7 @@ export default function LocationPicker({ value, onChange, origin = null, radiusK
   const mountedRef = useRef(false);
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState('');
+  const [tileError, setTileError] = useState(false);
 
   useEffect(() => { handlersRef.current = { onChange, disabled }; }, [onChange, disabled]);
   useEffect(() => {
@@ -27,8 +28,10 @@ export default function LocationPicker({ value, onChange, origin = null, radiusK
     const map = L.map(containerRef.current, { scrollWheelZoom: false }).setView([-2.5, 118], 4);
     mapRef.current = map;
     layersRef.current = L.layerGroup().addTo(map);
-    const tiles = L.tileLayer(TILE_URL, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(map);
-    tiles.on('tileerror', () => setError('Gambar peta belum dapat dimuat. Coba lagi atau masukkan koordinat lokasi.'));
+    // Tile OpenStreetMap menolak request tanpa Referer; paksa kirim origin meski halaman memakai no-referrer.
+    const tiles = L.tileLayer(TILE_URL, { maxZoom: 19, attribution: ATTRIBUTION, referrerPolicy: 'strict-origin-when-cross-origin' }).addTo(map);
+    tiles.on('tileerror', () => setTileError(true));
+    tiles.on('tileload', () => setTileError(false));
     map.on('click', (event) => {
       if (handlersRef.current.disabled) return;
       const point = event.latlng.wrap();
@@ -93,6 +96,7 @@ export default function LocationPicker({ value, onChange, origin = null, radiusK
       <div ref={containerRef} inert={disabled || undefined} aria-label={`Peta ${label.toLowerCase()}`} className="h-64 sm:h-72 rounded-xl border border-slate-200 relative z-0" />
       <p className="text-[11px] text-slate-500">Klik peta atau geser pin hijau. Jarak dihitung sebagai garis lurus dari toko.</p>
       {value && <p className="text-[11px] text-emerald-800">Pin terpilih: {value.lat.toFixed(6)}, {value.lng.toFixed(6)}</p>}
+      {tileError && <p role="alert" className="text-xs text-amber-800">Gambar peta belum dapat dimuat. Coba lagi atau masukkan koordinat lokasi.</p>}
       {error && <p role="alert" className="text-xs text-amber-800">{error}</p>}
       <CoordinateInputs key={value ? `${value.lat},${value.lng}` : 'empty'} value={value} onApply={onChange} disabled={disabled} />
     </div>
